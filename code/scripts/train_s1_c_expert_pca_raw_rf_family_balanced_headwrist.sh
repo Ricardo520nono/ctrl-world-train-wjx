@@ -76,15 +76,26 @@ RAW_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_raw_s0025_train_headwrist"
 RF_UNIFORM_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_rf300_uniform_train_headwrist"
 RF_WEIGHTED_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_rf300_weighted_train_headwrist"
 
+DATA_ROOT_ORIG="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/data_delta_ee/demo_clean_zed2i_visible"
+DATA_ROOT_PCA="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/perturbed_pca_gaussian/c_8_sigma_0p05"
 DATA_ROOT_RAW="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/perturbed_raw_gaussian/sigma_0p0025"
 RF_BASE="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/random_feasible_300step_5task_2ep5start_formal_v1/random_feasible_random_walk"
 DATA_ROOT_RF_UNIFORM="${RF_BASE}/rf_5task_300step_2ep5start_formal_uniform_10seed_v1"
 DATA_ROOT_RF_WEIGHTED="${RF_BASE}/rf_5task_300step_2ep5start_formal_weighted_10seed_v1"
 
-echo "[INFO] Checking existing expert/PCA headwrist latents..."
+echo "[INFO] Preparing expert headwrist latents..."
 for TASK in ${S1_TASKS}; do
-  test -f "${EXPERT_LATENT_ROOT}/${TASK}/meta.json"
-  test -f "${PCA_LATENT_ROOT}/${TASK}/meta.json"
+  TASK_LATENT_DIR="${EXPERT_LATENT_ROOT}/${TASK}"
+  if [[ -f "${TASK_LATENT_DIR}/meta.json" ]]; then
+    echo "[INFO] Expert latents already exist for ${TASK}, skipping."
+    continue
+  fi
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_delta_ee.py \
+    --data_dir  "${DATA_ROOT_ORIG}/${TASK}/data" \
+    --out_dir   "${TASK_LATENT_DIR}" \
+    --svd_path  "${SVD_PATH}" \
+    --task_name "${TASK}" \
+    --cameras   "${CAMERAS}"
 done
 
 precompute_enhanced_root() {
@@ -102,6 +113,7 @@ precompute_enhanced_root() {
     --cameras     "${CAMERAS}"
 }
 
+precompute_enhanced_root "pca_c8_sigma0p05" "${DATA_ROOT_PCA}" "${PCA_LATENT_ROOT}"
 precompute_enhanced_root "raw_sigma0p0025" "${DATA_ROOT_RAW}" "${RAW_LATENT_ROOT}"
 precompute_enhanced_root "random_feasible_uniform" "${DATA_ROOT_RF_UNIFORM}" "${RF_UNIFORM_LATENT_ROOT}"
 precompute_enhanced_root "random_feasible_weighted" "${DATA_ROOT_RF_WEIGHTED}" "${RF_WEIGHTED_LATENT_ROOT}"

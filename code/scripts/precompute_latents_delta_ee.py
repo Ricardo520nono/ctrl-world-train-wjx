@@ -20,9 +20,9 @@ import numpy as np
 import torch
 from PIL import Image
 
-# Default camera set (front + head + left wrist). Override with --cameras.
+# Default camera set for current mainline headwrist training. Override with --cameras.
 # Must be exactly 3 cameras: they are stacked vertically into (T, 4, 90, 40).
-CAMERA_KEYS = ["front_camera", "head_camera", "left_camera"]
+CAMERA_KEYS = ["head_camera", "left_camera", "right_camera"]
 IMG_SIZE = (320, 240)  # width x height -> VAE latent: 40 x 30
 
 

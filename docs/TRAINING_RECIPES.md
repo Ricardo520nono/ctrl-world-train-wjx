@@ -102,6 +102,15 @@ scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
 
 这是本次整理最重要的参考配置，对应 2026-06-10 成功跑完的 S1-C 训练。
 
+这条入口已经按 public 训练包做过路径整理，不依赖个人目录。它会：
+
+1. 安装/检查 Python 依赖。
+2. 使用 public 包内的 SVD/CLIP 权重。
+3. 从 public 数据目录读取 expert/PCA/raw/random feasible 数据。
+4. 按 head/left/right 三相机预编码 latent，已有 latent 会跳过。
+5. 计算或复用 `s1_C_expert_pca_raw_rf_3to1to1to1/stat.json`。
+6. 用 family-balanced sampler 启动 8 卡训练。
+
 配置：
 
 - 任务：同 S1 的 5 个任务。

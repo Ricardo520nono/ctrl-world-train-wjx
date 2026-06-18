@@ -2,7 +2,7 @@
 # Auto-copy new checkpoints from the S1-B (expert sliding + pca single) headwrist
 # run to the shared inference checkpoint directory. Polls every 60s.
 #
-#   src: /mnt/gyc_ckp/wjx/ctrlworld/s1_B_expert_sliding_pca_single_headwrist_20260605_004833
+#   src: latest ${OUTPUT_ROOT}/s1_B_expert_sliding_pca_single_headwrist_*
 #   dst: /mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/5tasks_experts_plus_pca_epoch
 #
 # Robustness: skips ckpts younger than STABLE_SECS (still being written), and
@@ -10,7 +10,16 @@
 
 set -uo pipefail
 
-SRC="${SRC:-/mnt/gyc_ckp/wjx/ctrlworld/s1_B_expert_sliding_pca_single_headwrist_20260605_004833}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+
+if [[ -z "${SRC:-}" ]]; then
+    SRC="$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name 's1_B_expert_sliding_pca_single_headwrist_*' 2>/dev/null | sort | tail -1)"
+fi
+if [[ -z "${SRC:-}" ]]; then
+    echo "[ERROR] No S1-B headwrist run found under ${OUTPUT_ROOT}. Set SRC=/path/to/run explicitly."
+    exit 2
+fi
 DST="${DST:-/mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/5tasks_experts_plus_pca_epoch}"
 POLL_SECS="${POLL_SECS:-60}"
 STABLE_SECS="${STABLE_SECS:-120}"

@@ -9,8 +9,8 @@ Takes the first --max_episodes episodes per task (sorted by episode/start/seed n
 Usage:
     python precompute_latents_enhanced.py \
         --data_root /mnt/public_ckp/.../c_8_sigma_0p05 \
-        --out_root  /mnt/gyc_ckp/wjx/ctrlworld/precomputed_latents_enhanced_14d \
-        --svd_path  /mnt/gyc/Ctrl-World/assets/models/stable-video-diffusion-img2vid \
+        --out_root  /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/precomputed_latents_enhanced_14d_headwrist \
+        --svd_path  /mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid \
         --max_episodes 100
 """
 
@@ -25,7 +25,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-CAMERA_KEYS = ["front_camera", "head_camera", "left_camera"]
+CAMERA_KEYS = ["head_camera", "left_camera", "right_camera"]
 IMG_SIZE = (320, 240)  # width x height -> VAE latent: 40 x 30
 
 

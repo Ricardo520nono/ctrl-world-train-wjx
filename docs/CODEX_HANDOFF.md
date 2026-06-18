@@ -11,13 +11,19 @@
 /mnt/public_ckp/cscsx_projects/ctrl_world_train/docs/TRAINING_RECIPES.md
 ```
 
-历史 headwrist 交接文档也保留在：
+当前主线是新版 headwrist 三相机：
 
-```bash
-/mnt/public_ckp/cscsx_projects/ctrl_world_train/docs/HANDOFF_ctrlworld_headwrist.md
+```text
+head_camera,left_camera,right_camera
 ```
 
-注意：新的 `README.md` 和本文件是当前 public 训练包的权威路径说明。历史文档里如果还出现 `/mnt/gyc/Ctrl-World` 或 `/mnt/gyc_ckp`，那是在描述当时原始训练 run 的位置。
+后续新增训练、预编码、推理评测都应该优先沿用这个相机顺序。旧的 `front/head/left` 只作为历史背景，不是默认入口。
+
+翔哥不需要访问 `/mnt/gyc` 或 `/mnt/gyc_ckp`。当前训练包的代码、文档、stat、小权重和大模型权重都已经迁移到：
+
+```bash
+/mnt/public_ckp/cscsx_projects/ctrl_world_train
+```
 
 ## 代码结构
 
@@ -31,6 +37,13 @@ ctrl_world_train/
   assets/models/
   docs/
 ```
+
+其中：
+
+- GitHub 仓库保存轻量代码和文档。
+- `/mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/` 保存大模型权重，不进 GitHub。
+- `/mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/` 是预编码 latent cache，按需生成，不进 GitHub。
+- `/mnt/public_ckp/cscsx_projects/ctrl_world_train/outputs/` 是训练输出目录，不进 GitHub。
 
 核心文件：
 
@@ -76,11 +89,19 @@ cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/launch_training.sh s1_c_3to1to1to1
 ```
 
-这是成功原始命令的 public 路径整理版：
+这是当前主线训练入口。它会从 public 数据目录读取原始数据和增强数据，把 latent cache 与训练输出写到 public 训练包内。
 
-```bash
-bash /mnt/gyc/Ctrl-World/scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
+S1-C 脚本会自动准备以下 latent cache：
+
+```text
+precomputed_latents_s1A_5tasks_14d_headwrist
+s1B_latents_pca_train_headwrist
+s1C_latents_raw_s0025_train_headwrist
+s1C_latents_rf300_uniform_train_headwrist
+s1C_latents_rf300_weighted_train_headwrist
 ```
+
+如果对应任务的 `meta.json` 已经存在，预编码会跳过；如果不存在，会重新从 public 数据目录编码。
 
 ## 路径覆盖
 
@@ -106,6 +127,15 @@ bash scripts/launch_training.sh s1_a_expert
 ```
 
 ## 大规模 8 卡训练前的检查
+
+先确认必要文件都在：
+
+```bash
+test -f /mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid/model_index.json
+test -d /mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid/vae
+test -f /mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/clip-vit-base-patch32/config.json
+test -f /mnt/public_ckp/cscsx_projects/ctrl_world_train/code/dataset_meta_info/s1_C_expert_pca_raw_rf_3to1to1to1/stat.json
+```
 
 检查 shell 脚本语法：
 

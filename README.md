@@ -1,6 +1,12 @@
 # Ctrl-World 训练包
 
-这是整理后的 Ctrl-World headwrist 机器人视频世界模型训练交接包。
+这是整理后的 Ctrl-World headwrist 机器人视频世界模型训练交接包。当前主线是新版三相机：
+
+```text
+head_camera,left_camera,right_camera
+```
+
+后续训练和测试默认都应该沿着这条 head/left/right 主线走。旧的 `front/head/left` 相机配置不再作为默认入口。
 
 共享盘根目录：
 
@@ -88,13 +94,7 @@ OUTPUT_ROOT=${TRAIN_PACKAGE_ROOT}/outputs
 
 ## 参考实验
 
-这次整理以成功跑完的 S1-C family-balanced 训练为参考。原始启动命令是：
-
-```bash
-bash /mnt/gyc/Ctrl-World/scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
-```
-
-整理后的等价入口是：
+这次整理以成功跑完的 S1-C family-balanced 训练为参考。翔哥或后续 Codex 不需要访问原始 `/mnt/gyc` 仓库，直接使用下面这个 public 路径入口即可：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code

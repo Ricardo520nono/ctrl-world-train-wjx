@@ -8,8 +8,8 @@ Directory structure:
 Usage:
     python precompute_latents_s1_pca.py \
         --data_root /mnt/public_ckp/.../c_8_sigma_0p05 \
-        --out_root  /mnt/gyc_ckp/wjx/ctrlworld/s1_latents_pca_train \
-        --svd_path  /mnt/gyc/Ctrl-World/assets/models/stable-video-diffusion-img2vid \
+        --out_root  /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/s1B_latents_pca_train_headwrist \
+        --svd_path  /mnt/public_ckp/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid \
         --tasks     click_alarmclock click_bell place_object_basket open_laptop stack_blocks_two \
         --episode_min 0 --episode_max 39
 """
@@ -25,9 +25,9 @@ import numpy as np
 import torch
 from PIL import Image
 
-# Default camera set (front + head + left wrist). Override with --cameras.
+# Default camera set for current mainline headwrist training. Override with --cameras.
 # Must be exactly 3 cameras: they are stacked vertically into (T, 4, 90, 40).
-CAMERA_KEYS = ["front_camera", "head_camera", "left_camera"]
+CAMERA_KEYS = ["head_camera", "left_camera", "right_camera"]
 IMG_SIZE = (320, 240)
 
 

@@ -9,19 +9,19 @@ Usage:
     # A group
     python compute_stat_s1.py \
         --group A \
-        --expert_root /mnt/gyc_ckp/wjx/ctrlworld/precomputed_latents_delta_ee_all50_14d \
+        --expert_root /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/precomputed_latents_s1A_5tasks_14d_headwrist \
         --tasks click_alarmclock click_bell place_object_basket open_laptop stack_blocks_two \
         --episode_split 0-39 \
-        --out_dir /mnt/gyc/Ctrl-World/dataset_meta_info/s1_A_expert_only
+        --out_dir /mnt/public_ckp/cscsx_projects/ctrl_world_train/code/dataset_meta_info/s1_A_expert_only
 
     # B group
     python compute_stat_s1.py \
         --group B \
-        --expert_root /mnt/gyc_ckp/wjx/ctrlworld/precomputed_latents_delta_ee_all50_14d \
-        --pca_root    /mnt/gyc_ckp/wjx/ctrlworld/s1_latents_pca_train \
+        --expert_root /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/precomputed_latents_s1B_5tasks_14d_headwrist \
+        --pca_root    /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/s1B_latents_pca_train_headwrist \
         --tasks click_alarmclock click_bell place_object_basket open_laptop stack_blocks_two \
         --episode_split 0-39 \
-        --out_dir /mnt/gyc/Ctrl-World/dataset_meta_info/s1_B_expert_plus_pca
+        --out_dir /mnt/public_ckp/cscsx_projects/ctrl_world_train/code/dataset_meta_info/s1_B_expert_plus_pca
 """
 
 import argparse

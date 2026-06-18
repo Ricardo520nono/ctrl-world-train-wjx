@@ -7,9 +7,9 @@ Saves stat.json to --out_dir compatible with existing DeltaEEDataset format.
 
 Usage:
     python compute_stat_enhanced.py \
-        --latent_root_orig /mnt/gyc_ckp/wjx/ctrlworld/precomputed_latents_delta_ee_all50_14d \
-        --latent_root_enhanced /mnt/gyc_ckp/wjx/ctrlworld/precomputed_latents_enhanced_14d \
-        --out_dir /mnt/gyc/Ctrl-World/dataset_meta_info/delta_ee_all50_enhanced_14d \
+        --latent_root_orig /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/precomputed_latents_delta_ee_all50_14d_headwrist \
+        --latent_root_enhanced /mnt/public_ckp/cscsx_projects/ctrl_world_train/latents/precomputed_latents_enhanced_14d_headwrist \
+        --out_dir /mnt/public_ckp/cscsx_projects/ctrl_world_train/code/dataset_meta_info/delta_ee_all50_enhanced_14d \
         --action_dim 14
 """
 

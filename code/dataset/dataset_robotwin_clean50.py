@@ -30,7 +30,7 @@ class RobotwinClean50Dataset(Dataset):
         self.p99 = np.array(stat["state_99"], dtype=np.float32)[: self.action_dim]
 
         # collect episodes from all task latent dirs
-        latent_root = args.dataset_root_path  # e.g. /mnt/gyc_wjx/Ctrl-World/model_ckpt/precomputed_latents
+        latent_root = args.dataset_root_path
         task_names = args.dataset_names.split("+")
         self.episodes = []
         for task in task_names:

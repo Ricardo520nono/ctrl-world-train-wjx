@@ -2,7 +2,7 @@
 # Auto-copy new checkpoints from the all50 headwrist training run to the
 # shared inference checkpoint directory. Polls every 60s.
 #
-#   src: /mnt/gyc_ckp/wjx/ctrlworld/ctrlworld_delta_ee_all50_8gpu_nf16_60k_headwrist_20260604_222617
+#   src: latest ${OUTPUT_ROOT}/ctrlworld_delta_ee_all50_8gpu_nf16_60k_headwrist_*
 #   dst: /mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/50tasks_headwrist
 #
 # Robustness:
@@ -13,7 +13,16 @@
 
 set -uo pipefail
 
-SRC="${SRC:-/mnt/gyc_ckp/wjx/ctrlworld/ctrlworld_delta_ee_all50_8gpu_nf16_60k_headwrist_20260604_222617}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+
+if [[ -z "${SRC:-}" ]]; then
+    SRC="$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name 'ctrlworld_delta_ee_all50_8gpu_nf16_60k_headwrist_*' 2>/dev/null | sort | tail -1)"
+fi
+if [[ -z "${SRC:-}" ]]; then
+    echo "[ERROR] No all50 headwrist run found under ${OUTPUT_ROOT}. Set SRC=/path/to/run explicitly."
+    exit 2
+fi
 DST="${DST:-/mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/50tasks_headwrist}"
 POLL_SECS="${POLL_SECS:-60}"
 STABLE_SECS="${STABLE_SECS:-120}"
