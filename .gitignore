@@ -1,0 +1,17 @@
+.env
+latents/
+outputs/
+checkpoints/
+wandb/
+*.log
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+!code/models/action_adapter/model2_15_9.pth
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Model weights are stored on the shared filesystem, not in GitHub.
+assets/models/
