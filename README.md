@@ -1,52 +1,52 @@
-# Ctrl-World Training Package
+# Ctrl-World 训练包
 
-This package is the cleaned training handoff for Ctrl-World headwrist robot video world models.
+这是整理后的 Ctrl-World headwrist 机器人视频世界模型训练交接包。
 
-Public root:
+共享盘根目录：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_train
 ```
 
-The code is set up so a future Codex agent can install dependencies, precompute latents, compute stats, and launch 8-GPU training from this shared path.
+这个目录的目标是让后续 Codex 可以直接从共享路径接手：安装依赖、预编码 latent、计算 action stat、启动百度云 8 卡训练，并把 checkpoint 同步到推理目录。
 
-## What Is Included
+## 目录内容
 
-- `code/`: Ctrl-World model, dataset, training, precompute, stat, watcher, and launch scripts.
-- `assets/models/`: local SVD and CLIP weights used by training. This directory exists on the shared filesystem but is excluded from GitHub.
-- `docs/`: handoff and experiment notes.
-- `.env.sample`: template for W&B secrets and optional path overrides.
+- `code/`：Ctrl-World 模型、数据集、训练、预编码、stat、watcher 和启动脚本。
+- `assets/models/`：训练使用的本地 SVD 和 CLIP 权重。该目录存在于共享盘，但不会提交到 GitHub。
+- `docs/`：训练交接、实验配置和操作说明。
+- `.env.sample`：W&B 密钥和可选路径覆盖的模板。
 
-## Quick Start
+## 快速开始
 
-Create the env file:
+先创建环境变量文件：
 
 ```bash
 cp /mnt/public_ckp/cscsx_projects/ctrl_world_train/.env.sample \
    /mnt/public_ckp/cscsx_projects/ctrl_world_train/.env
 ```
 
-Fill `WANDB_API_KEY` in:
+然后在下面这个文件里填写 `WANDB_API_KEY`：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_train/.env
 ```
 
-Install dependencies:
+安装依赖：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/install_ctrlworld_train_env.sh
 ```
 
-Launch the main S1-C experiment, matching the successful 2026-06-10 run:
+启动主实验 S1-C，也就是复现 2026-06-10 那次成功的 3:1:1:1 family-balanced 训练：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/launch_training.sh s1_c_3to1to1to1
 ```
 
-## Main Recipes
+## 主要训练入口
 
 ```bash
 bash scripts/launch_training.sh all50_headwrist
@@ -56,15 +56,15 @@ bash scripts/launch_training.sh s1_c_3to1to1to1
 bash scripts/launch_training.sh s1_a_single_task place_object_basket
 ```
 
-## Default Paths
+## 默认路径
 
-Defaults are defined in:
+默认路径统一定义在：
 
 ```bash
 code/scripts/ctrlworld_train_env.sh
 ```
 
-Important defaults:
+几个关键默认值：
 
 ```bash
 TRAIN_PACKAGE_ROOT=/mnt/public_ckp/cscsx_projects/ctrl_world_train
@@ -74,45 +74,45 @@ CACHE_ROOT=${TRAIN_PACKAGE_ROOT}/latents
 OUTPUT_ROOT=${TRAIN_PACKAGE_ROOT}/outputs
 ```
 
-Raw data remains under:
+原始数据仍然使用共享数据目录：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/data/ActionFollowingBench
 ```
 
-Existing inference checkpoints remain under:
+已有推理 checkpoint 仍然放在：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints
 ```
 
-## Reference Experiment
+## 参考实验
 
-The key reference is the successful S1-C family-balanced run:
+这次整理以成功跑完的 S1-C family-balanced 训练为参考。原始启动命令是：
 
 ```bash
 bash /mnt/gyc/Ctrl-World/scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
 ```
 
-The cleaned equivalent is:
+整理后的等价入口是：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/launch_training.sh s1_c_3to1to1to1
 ```
 
-It trains:
+这版训练配置：
 
-- 5 tasks: `click_alarmclock`, `click_bell`, `place_object_basket`, `open_laptop`, `stack_blocks_two`
-- 4 data families: expert, PCA, raw Gaussian, random feasible
-- Family sampling: `3:1:1:1`, implemented as `0.5, 0.166667, 0.166667, 0.166667`
-- Cameras: `head_camera,left_camera,right_camera`
-- Chunk size: `num_frames=16`
-- History: `num_history=6`
-- Steps: `40000`
-- 8-GPU distributed training
+- 5 个任务：`click_alarmclock`、`click_bell`、`place_object_basket`、`open_laptop`、`stack_blocks_two`
+- 4 类数据 family：expert、PCA、raw Gaussian、random feasible
+- family 采样比例：`3:1:1:1`，脚本中写成 `0.5, 0.166667, 0.166667, 0.166667`
+- 相机：`head_camera,left_camera,right_camera`
+- chunk size：`num_frames=16`
+- history：`num_history=6`
+- 训练步数：`40000`
+- 训练方式：百度云 8 卡分布式
 
-More details:
+更多说明见：
 
 ```bash
 docs/TRAINING_RECIPES.md

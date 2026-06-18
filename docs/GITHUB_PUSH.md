@@ -1,26 +1,26 @@
-# GitHub Push Notes
+# GitHub 推送说明
 
-The local Git repository is initialized at:
+本地 Git 仓库位置：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_train
 ```
 
-Branch:
+分支：
 
 ```bash
 main
 ```
 
-Large runtime files are intentionally excluded by `.gitignore`:
+以下大文件或运行产物不会提交到 GitHub，已经由 `.gitignore` 排除：
 
 - `.env`
 - `assets/models/`
 - `latents/`
 - `outputs/`
-- checkpoints and logs
+- checkpoint 和 log
 
-After creating an empty GitHub repository, push with:
+如果需要重新设置远端仓库，可以执行：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train
@@ -28,7 +28,7 @@ git remote add origin git@github.com:<OWNER>/<REPO>.git
 git push -u origin main
 ```
 
-Or with HTTPS:
+也可以使用 HTTPS：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train
@@ -36,7 +36,7 @@ git remote add origin https://github.com/<OWNER>/<REPO>.git
 git push -u origin main
 ```
 
-Before pushing, confirm the staged repository is lightweight:
+推送前建议确认仓库仍然很轻：
 
 ```bash
 git status --short --ignored
@@ -44,4 +44,4 @@ git ls-files | wc -l
 git count-objects -vH
 ```
 
-Expected: `assets/models/` appears only as ignored, not tracked.
+预期结果：`assets/models/` 只会显示为 ignored，不会出现在 tracked 文件里。

@@ -1,25 +1,25 @@
-# Codex Handoff
+# Codex 接手说明
 
-This document is written for a future Codex agent taking over Ctrl-World training.
+这份文档是给后续接手 Ctrl-World 训练任务的 Codex 看的。
 
-## First Read
+## 优先阅读
 
-Start here:
+先读：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_train/README.md
 /mnt/public_ckp/cscsx_projects/ctrl_world_train/docs/TRAINING_RECIPES.md
 ```
 
-The historical headwrist handoff is also included:
+历史 headwrist 交接文档也保留在：
 
 ```bash
 /mnt/public_ckp/cscsx_projects/ctrl_world_train/docs/HANDOFF_ctrlworld_headwrist.md
 ```
 
-Treat the new README and this file as authoritative for paths. Some historical docs still mention `/mnt/gyc/Ctrl-World` or `/mnt/gyc_ckp`; those describe the original run locations.
+注意：新的 `README.md` 和本文件是当前 public 训练包的权威路径说明。历史文档里如果还出现 `/mnt/gyc/Ctrl-World` 或 `/mnt/gyc_ckp`，那是在描述当时原始训练 run 的位置。
 
-## Code Layout
+## 代码结构
 
 ```text
 ctrl_world_train/
@@ -32,7 +32,7 @@ ctrl_world_train/
   docs/
 ```
 
-Core files:
+核心文件：
 
 ```bash
 code/scripts/train_delta_ee.py
@@ -45,57 +45,52 @@ code/scripts/compute_stat_family_roots.py
 code/models/ctrl_world.py
 ```
 
-## Environment
+## 环境准备
 
-Create:
-
-```bash
-/mnt/public_ckp/cscsx_projects/ctrl_world_train/.env
-```
-
-from:
+从模板创建环境变量文件：
 
 ```bash
-/mnt/public_ckp/cscsx_projects/ctrl_world_train/.env.sample
+cp /mnt/public_ckp/cscsx_projects/ctrl_world_train/.env.sample \
+   /mnt/public_ckp/cscsx_projects/ctrl_world_train/.env
 ```
 
-Required:
+必须填写：
 
 ```bash
 WANDB_API_KEY=...
 ```
 
-Install:
+安装依赖：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/install_ctrlworld_train_env.sh
 ```
 
-## Main One-Command Training
+## 主训练一键入口
 
-For the current recommended S1-C recipe:
+当前推荐的 S1-C 训练：
 
 ```bash
 cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/launch_training.sh s1_c_3to1to1to1
 ```
 
-This is the cleaned equivalent of the successful original command:
+这是成功原始命令的 public 路径整理版：
 
 ```bash
 bash /mnt/gyc/Ctrl-World/scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
 ```
 
-## Path Overrides
+## 路径覆盖
 
-Defaults are in:
+默认路径在这里定义：
 
 ```bash
 code/scripts/ctrlworld_train_env.sh
 ```
 
-Common overrides:
+常用覆盖项：
 
 ```bash
 PYTHON_BIN=/usr/bin/python3
@@ -103,22 +98,22 @@ CACHE_ROOT=/mnt/public_ckp/cscsx_projects/ctrl_world_train/latents
 OUTPUT_ROOT=/mnt/public_ckp/cscsx_projects/ctrl_world_train/outputs
 ```
 
-Example:
+例子：
 
 ```bash
 OUTPUT_ROOT=/mnt/public_ckp/cscsx_projects/ctrl_world_train/outputs_test \
 bash scripts/launch_training.sh s1_a_expert
 ```
 
-## Validation Before Expensive 8-GPU Jobs
+## 大规模 8 卡训练前的检查
 
-Static shell syntax:
+检查 shell 脚本语法：
 
 ```bash
 for f in scripts/*.sh; do bash -n "$f"; done
 ```
 
-Python compile:
+检查 Python 编译：
 
 ```bash
 python3 -m py_compile \
@@ -128,27 +123,27 @@ python3 -m py_compile \
   models/ctrl_world.py
 ```
 
-Family sampler wiring without requiring precomputed real latents:
+不依赖真实 latent，只检查 family sampler 接线：
 
 ```bash
 python3 scripts/validate_s1c_family_pipeline.py --skip-real-inputs
 ```
 
-Full S1-C validation after S1-A/S1-B latents exist:
+如果 S1-A/S1-B latent 已经存在，可以跑完整 S1-C pipeline 检查：
 
 ```bash
 python3 scripts/validate_s1c_family_pipeline.py
 ```
 
-## What Not To Commit
+## 不要提交的内容
 
-Do not commit:
+不要提交：
 
 - `.env`
 - `assets/models/`
 - `latents/`
 - `outputs/`
-- checkpoints
-- logs
+- checkpoint
+- log
 
-These are excluded by the root `.gitignore`.
+这些都已经被根目录 `.gitignore` 排除。
