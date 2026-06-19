@@ -59,6 +59,7 @@ bash scripts/launch_training.sh all50_headwrist
 bash scripts/launch_training.sh s1_a_expert
 bash scripts/launch_training.sh s1_b_expert_pca
 bash scripts/launch_training.sh s1_c_3to1to1to1
+bash scripts/launch_training.sh s1_c_ee_head
 bash scripts/launch_training.sh s1_a_single_task place_object_basket
 ```
 
@@ -111,6 +112,8 @@ bash scripts/launch_training.sh s1_c_3to1to1to1
 - history：`num_history=6`
 - 训练步数：`40000`
 - 训练方式：百度云 8 卡分布式
+
+新增的 `s1_c_ee_head` 使用同一套 S1-C family-balanced 数据和训练超参，但显式开启 EE trajectory auxiliary head。它会从 RoboTwin HDF5 `endpose/*` 构造每帧左右臂 `xyz + rotation_6d + gripper` 监督，并在 latent cache 缺少 `ee_target` 时先补齐该字段。
 
 更多说明见：
 

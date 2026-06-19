@@ -18,9 +18,11 @@ import numpy as np
 import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from dataset.ee_targets import EE_TARGET_DIM
 
-TRAIN_PACKAGE_ROOT = os.environ.get("TRAIN_PACKAGE_ROOT", "/mnt/public_ckp/cscsx_projects/ctrl_world_train")
-PROJECT_ROOT = os.environ.get("PROJECT_ROOT", os.path.join(TRAIN_PACKAGE_ROOT, "code"))
+PROJECT_ROOT_DEFAULT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAIN_PACKAGE_ROOT = os.environ.get("TRAIN_PACKAGE_ROOT", os.path.dirname(PROJECT_ROOT_DEFAULT))
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT", PROJECT_ROOT_DEFAULT)
 CACHE_ROOT = os.environ.get("CACHE_ROOT", os.path.join(TRAIN_PACKAGE_ROOT, "latents"))
 
 TASKS = [
@@ -111,8 +113,9 @@ def write_toy_root(root, family_name, tasks):
             T = 28 + task_i + ep
             latent = torch.randn(T, 4, 90, 40)
             action = np.random.default_rng(task_i * 100 + ep).normal(size=(T, 14)).astype(np.float32)
+            ee_target = np.random.default_rng(task_i * 200 + ep).normal(size=(T, EE_TARGET_DIM)).astype(np.float32)
             path = os.path.join(task_dir, f"{family_name}_{task}_episode_{ep:04d}.pt")
-            torch.save({"latent": latent, "action_pos": action}, path)
+            torch.save({"latent": latent, "action_pos": action, "ee_target": ee_target}, path)
             meta.append({"episode": ep, "file": path, "T": T, "family": family_name})
         with open(os.path.join(task_dir, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
@@ -138,6 +141,7 @@ def check_toy_family_dataset():
             num_history = 6
             num_frames = 16
             action_dim = 14
+            use_ee_head = False
             dataset_meta_info_path = os.path.join(tmp, "meta")
             dataset_cfgs = "toy"
             episode_split = "0-1"
@@ -159,6 +163,7 @@ def check_toy_family_dataset():
         sample = ds[0]
         assert sample["latent"].shape == (22, 4, 90, 40)
         assert sample["action"].shape == (22, 14)
+        assert "ee_target" not in sample
         assert isinstance(sample["text"], str)
         print("  ok toy sample:", sample["latent"].shape, sample["action"].shape, sample["text"])
     finally:
@@ -173,6 +178,7 @@ def check_training_script_args():
         "--use_family_balanced_sampler",
         "--family_root_paths",
         "--family_sampling",
+        "--use_ee_head",
         "DeltaEEFamilyBalancedDataset",
     ]:
         if needle not in text:

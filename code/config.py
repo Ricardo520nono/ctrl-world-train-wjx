@@ -66,6 +66,9 @@ class wm_args:
     text_cond = True
     frame_level_cond = True
     his_cond_zero = False
+    use_ee_head = False
+    ee_loss_weight = 0.05
+    ee_head_hidden_dim = 256
     dtype = torch.bfloat16 # [torch.float32, torch.bfloat16] # during inference, we can use bfloat16 to accelerate the inference speed and save memory
 
 

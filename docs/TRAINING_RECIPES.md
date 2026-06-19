@@ -132,6 +132,46 @@ FAMILY_DATASET_LENGTH=68429
 - chunk size：`16`。
 - 保存：每个完整 epoch 保存一次，最后额外保存 final checkpoint。
 
+## s1_c_ee_head
+
+启动：
+
+```bash
+bash scripts/launch_training.sh s1_c_ee_head
+```
+
+底层脚本：
+
+```bash
+scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist_ee_head.sh
+```
+
+这是 S1-C 的 EE trajectory auxiliary head 版本。默认仍使用同一套 S1 5 任务、head/left/right 三相机、`3:1:1:1` family-balanced sampler、`40000` steps 和 chunk size `16`。
+
+显式 EE 配置：
+
+```bash
+USE_EE_HEAD=1
+EE_LOSS_WEIGHT=0.05
+EE_HEAD_HIDDEN_DIM=256
+```
+
+监督目标来自 RoboTwin HDF5 `endpose/*`：
+
+```text
+left:  xyz + rotation_6d + gripper
+right: xyz + rotation_6d + gripper
+total dim = 20
+```
+
+已有 latent cache 如果缺少 `ee_target`，脚本会先运行：
+
+```bash
+scripts/backfill_ee_targets.py
+```
+
+no-head baseline `s1_c_3to1to1to1` 不读取 `ee_target`，旧缓存仍可直接使用。
+
 ## s1_a_single_task
 
 启动一个单任务训练：

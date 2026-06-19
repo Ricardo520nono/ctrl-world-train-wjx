@@ -16,6 +16,7 @@ import json
 from decord import VideoReader, cpu
 import wandb
 # import mediapy  # not used here; removed to avoid ffmpeg dependency on inference nodes
+from models.ee_head import EETrajectoryHead, compute_ee_losses
 
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
@@ -140,6 +141,9 @@ class CrtlWorld(nn.Module):
 
         # initialize an action projector
         self.action_encoder = Action_encoder2(action_dim=args.action_dim, action_num=int(args.num_history+args.num_frames), hidden_size=1024, text_cond=args.text_cond)
+        self.use_ee_head = args.use_ee_head
+        if self.use_ee_head:
+            self.ee_head = EETrajectoryHead(hidden_dim=int(args.ee_head_hidden_dim))
 
     
 
@@ -201,11 +205,22 @@ class CrtlWorld(nn.Module):
         added_time_ids = added_time_ids.to(device)
 
         # forward unet
-        loss = 0
         model_pred = self.unet(input_latents, c_noise, encoder_hidden_states=action_hidden, added_time_ids=added_time_ids,frame_level_cond=self.args.frame_level_cond).sample
         predict_x0 = c_out * model_pred + c_skip * noisy_latents 
 
         # only calculate loss on future frames
-        loss += ((predict_x0[:,num_history:] - latents[:,num_history:])**2 * loss_weight).mean()
+        video_loss = ((predict_x0[:,num_history:] - latents[:,num_history:])**2 * loss_weight).mean()
+        loss = video_loss
+        loss_dict = {"video_loss": video_loss.detach()}
 
-        return loss, torch.tensor(0.0, device=device,dtype=dtype)
+        if self.use_ee_head:
+            ee_target = batch["ee_target"][:, num_history:]
+            ee_target = ee_target.to(device=device, dtype=dtype)
+            ee_pred = self.ee_head(predict_x0[:, num_history:])
+            ee_loss, ee_loss_dict = compute_ee_losses(ee_pred, ee_target)
+            loss = loss + float(self.args.ee_loss_weight) * ee_loss
+            loss_dict["ee_loss"] = ee_loss.detach()
+            for key, value in ee_loss_dict.items():
+                loss_dict[key] = value.detach()
+
+        return loss, loss_dict

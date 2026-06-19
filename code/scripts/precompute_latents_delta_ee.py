@@ -14,11 +14,15 @@ import argparse
 import io
 import json
 import os
+import sys
 
 import h5py
 import numpy as np
 import torch
 from PIL import Image
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from dataset.ee_targets import ee_target_from_hdf5
 
 # Default camera set for current mainline headwrist training. Override with --cameras.
 # Must be exactly 3 cameras: they are stacked vertically into (T, 4, 90, 40).
@@ -71,7 +75,10 @@ def process_data_dir(data_dir: str, out_dir: str, svd_path: str, task_name: str)
             r_pose = np.array(f["delta_ee_action/right_delta_pose"], dtype=np.float32)  # (T, 6)
             r_grip = np.array(f["delta_ee_action/right_gripper"],    dtype=np.float32)[:, None]  # (T, 1)
             action_pos = np.concatenate([l_pose, l_grip, r_pose, r_grip], axis=1)  # (T, 14)
+            ee_target = ee_target_from_hdf5(f)  # (T, 20): left/right xyz + rot6d + gripper
             T = action_pos.shape[0]
+            if ee_target.shape[0] != T:
+                raise RuntimeError(f"EE target length mismatch: action={T}, ee_target={ee_target.shape[0]}")
 
             # encode 3 cameras
             cam_latents = {}
@@ -86,7 +93,7 @@ def process_data_dir(data_dir: str, out_dir: str, svd_path: str, task_name: str)
             stacked[:, :, i*30:(i+1)*30, :] = cam_latents[cam_key][:, :, :30, :40]
 
         ep_out = os.path.join(out_dir, f"episode_{ep_idx:04d}.pt")
-        torch.save({"latent": stacked, "action_pos": action_pos, "task": task_name}, ep_out)
+        torch.save({"latent": stacked, "action_pos": action_pos, "ee_target": ee_target, "task": task_name}, ep_out)
         meta.append({"episode": ep_idx, "file": ep_out, "T": T})
 
     json.dump(meta, open(os.path.join(out_dir, "meta.json"), "w"), indent=2)

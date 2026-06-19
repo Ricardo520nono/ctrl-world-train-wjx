@@ -9,6 +9,12 @@ cd /mnt/public_ckp/cscsx_projects/ctrl_world_train/code
 bash scripts/launch_training.sh s1_c_3to1to1to1
 ```
 
+EE trajectory auxiliary head ablation 入口：
+
+```bash
+bash scripts/launch_training.sh s1_c_ee_head
+```
+
 底层脚本：
 
 ```bash
@@ -208,6 +214,32 @@ checkpoint 保存逻辑：
 - 不按固定 step 保存
 - 每完成 1 个 epoch 保存一次
 - 训练结束额外保存 `checkpoint-final-step40000.pt`
+
+## 8.1 EE trajectory auxiliary head
+
+`s1_c_ee_head` 复用 S1-C 主配置，并显式开启：
+
+```bash
+USE_EE_HEAD=1
+EE_LOSS_WEIGHT=0.05
+EE_HEAD_HIDDEN_DIM=256
+```
+
+模型从预测出的 future latent 接轻量 CNN + MLP head，逐未来帧预测左右臂 EE target：
+
+```text
+left  = xyz(3) + rotation_6d(6) + gripper(1)
+right = xyz(3) + rotation_6d(6) + gripper(1)
+total = 20
+```
+
+loss：
+
+```text
+position MSE + rotation 6D MSE + gripper BCE
+```
+
+目标由 RoboTwin HDF5 `endpose/*` 构造。新预编码会直接写入 `ee_target`；旧 latent cache 在 EE-head 入口下会先由 `scripts/backfill_ee_targets.py` 补齐。no-head S1-C baseline 不读取 `ee_target`。
 
 ## 9. 输出目录
 

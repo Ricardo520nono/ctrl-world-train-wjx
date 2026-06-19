@@ -163,7 +163,7 @@ def main(args):
             data_time = time.time() - data_timer
             is_last_accum = (forward_step + 1) % args.gradient_accumulation_steps == 0
             with accelerator.autocast():
-                loss_gen, _ = model(batch)
+                loss_gen, loss_dict = model(batch)
             avg_loss = accelerator.gather(loss_gen.repeat(args.train_batch_size)).mean()
             train_loss += avg_loss.item() / args.gradient_accumulation_steps
             accelerator.backward(loss_gen)
@@ -200,6 +200,10 @@ def main(args):
                     "iter_time_s": float(iter_time),
                     "gpu_mem_gb": float(gpu_mem_gb),
                 }
+                if isinstance(loss_dict, dict):
+                    for key, value in loss_dict.items():
+                        gathered = accelerator.gather(value.detach().float().repeat(args.train_batch_size)).mean()
+                        log_payload[key] = float(gathered.item())
                 accelerator.log(log_payload, step=global_step)
 
                 if global_step % 20 == 0:
@@ -394,6 +398,9 @@ if __name__ == "__main__":
                         help="Virtual dataset length for family-balanced sampling. Defaults to all available windows.")
     parser.add_argument('--use_abs_joint_action', action='store_true')
     parser.add_argument('--use_deepspeed', action='store_true')
+    parser.add_argument('--use_ee_head', action='store_true')
+    parser.add_argument('--ee_loss_weight', type=float, default=None)
+    parser.add_argument('--ee_head_hidden_dim', type=int, default=None)
     args_new = parser.parse_args()
     args = wm_args()
 
@@ -410,7 +417,6 @@ if __name__ == "__main__":
 
     if not hasattr(args, 'use_abs_joint_action'):
         args.use_abs_joint_action = False
-
     main(args)
 
     # CUDA_VISIBLE_DEVICES=0,1 WANDB_MODE=offline accelerate launch --main_process_port 29501 train_wm.py --dataset_root_path dataset_example --dataset_meta_info_path dataset_meta_info

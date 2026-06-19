@@ -14,6 +14,7 @@ Recipes:
   s1_a_expert           5 tasks, expert-only, chunk16, 40k steps
   s1_b_expert_pca       5 tasks, expert + PCA, chunk16, 40k steps
   s1_c_3to1to1to1       5 tasks, expert + PCA + raw + random-feasible, 3:1:1:1, chunk16, 40k steps
+  s1_c_ee_head          S1-C with EE trajectory auxiliary head enabled
   s1_a_single_task      one S1 task expert-only, chunk16, 40k steps; requires [task]
 
 Single-task names:
@@ -25,6 +26,7 @@ Single-task names:
 
 Examples:
   bash scripts/launch_training.sh s1_c_3to1to1to1
+  bash scripts/launch_training.sh s1_c_ee_head
   bash scripts/launch_training.sh s1_a_single_task place_object_basket
 USAGE
 }
@@ -49,6 +51,9 @@ case "${recipe}" in
     ;;
   s1_c_3to1to1to1)
     exec bash "${SCRIPT_DIR}/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh"
+    ;;
+  s1_c_ee_head)
+    exec bash "${SCRIPT_DIR}/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist_ee_head.sh"
     ;;
   s1_a_single_task)
     if [[ -z "${task}" ]]; then

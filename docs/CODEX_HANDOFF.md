@@ -53,9 +53,11 @@ code/dataset/dataset_delta_ee.py
 code/dataset/dataset_delta_ee_family.py
 code/scripts/precompute_latents_delta_ee.py
 code/scripts/precompute_latents_s1_pca.py
+code/scripts/backfill_ee_targets.py
 code/scripts/compute_stat_s1.py
 code/scripts/compute_stat_family_roots.py
 code/models/ctrl_world.py
+code/models/ee_head.py
 ```
 
 ## 环境准备
@@ -157,6 +159,12 @@ python3 -m py_compile \
 
 ```bash
 python3 scripts/validate_s1c_family_pipeline.py --skip-real-inputs
+```
+
+检查 EE head / loss / target shape：
+
+```bash
+python3 scripts/validate_ee_head_smoke.py
 ```
 
 如果 S1-A/S1-B latent 已经存在，可以跑完整 S1-C pipeline 检查：

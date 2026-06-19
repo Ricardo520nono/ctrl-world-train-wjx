@@ -27,7 +27,8 @@ if [[ -z "${WANDB_API_KEY:-}" ]]; then
 fi
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
-RUN_NAME="s1_C_3to1to1to1_family_balanced_headwrist_${RUN_TS}"
+RUN_NAME_PREFIX="${RUN_NAME_PREFIX:-s1_C_3to1to1to1_family_balanced_headwrist}"
+RUN_NAME="${RUN_NAME_PREFIX}_${RUN_TS}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 exec > >(tee -a "${OUTPUT_DIR}/run.log") 2>&1
@@ -118,6 +119,35 @@ precompute_enhanced_root "raw_sigma0p0025" "${DATA_ROOT_RAW}" "${RAW_LATENT_ROOT
 precompute_enhanced_root "random_feasible_uniform" "${DATA_ROOT_RF_UNIFORM}" "${RF_UNIFORM_LATENT_ROOT}"
 precompute_enhanced_root "random_feasible_weighted" "${DATA_ROOT_RF_WEIGHTED}" "${RF_WEIGHTED_LATENT_ROOT}"
 
+if [[ "${USE_EE_HEAD:-0}" == "1" ]]; then
+  echo "[INFO] Ensuring EE targets exist in latent caches..."
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/backfill_ee_targets.py \
+    --latent_root "${EXPERT_LATENT_ROOT}" \
+    --data_root "${DATA_ROOT_ORIG}" \
+    --tasks ${S1_TASKS} \
+    --layout clean
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/backfill_ee_targets.py \
+    --latent_root "${PCA_LATENT_ROOT}" \
+    --data_root "${DATA_ROOT_PCA}" \
+    --tasks ${S1_TASKS} \
+    --layout enhanced
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/backfill_ee_targets.py \
+    --latent_root "${RAW_LATENT_ROOT}" \
+    --data_root "${DATA_ROOT_RAW}" \
+    --tasks ${S1_TASKS} \
+    --layout enhanced
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/backfill_ee_targets.py \
+    --latent_root "${RF_UNIFORM_LATENT_ROOT}" \
+    --data_root "${DATA_ROOT_RF_UNIFORM}" \
+    --tasks ${S1_TASKS} \
+    --layout enhanced
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/backfill_ee_targets.py \
+    --latent_root "${RF_WEIGHTED_LATENT_ROOT}" \
+    --data_root "${DATA_ROOT_RF_WEIGHTED}" \
+    --tasks ${S1_TASKS} \
+    --layout enhanced
+fi
+
 STAT_PATH="${META_INFO_BASE}/${DATASET_CFGS}/stat.json"
 if [[ ! -f "${STAT_PATH}" ]]; then
   echo "[INFO] Computing four-family action stat..."
@@ -142,15 +172,30 @@ FAMILY_SAMPLING="expert=0.5,pca=0.166667,raw=0.166667,random_feasible=0.166667"
 # 34214 + 11405 + 11405 + 11405 = 68429 windows.
 FAMILY_DATASET_LENGTH=68429
 
+EE_HEAD_ARGS=()
+if [[ "${USE_EE_HEAD:-0}" == "1" ]]; then
+  EE_LOSS_WEIGHT="${EE_LOSS_WEIGHT:?USE_EE_HEAD=1 requires EE_LOSS_WEIGHT}"
+  EE_HEAD_HIDDEN_DIM="${EE_HEAD_HIDDEN_DIM:?USE_EE_HEAD=1 requires EE_HEAD_HIDDEN_DIM}"
+  EE_HEAD_ARGS+=(--use_ee_head)
+  EE_HEAD_ARGS+=(--ee_loss_weight "${EE_LOSS_WEIGHT}")
+  EE_HEAD_ARGS+=(--ee_head_hidden_dim "${EE_HEAD_HIDDEN_DIM}")
+fi
+
 printf '%s\n' "$(date): ${RUN_NAME} (3:1:1:1 family-balanced, cameras=${CAMERAS})" > "${OUTPUT_DIR}/launch_cmd.txt"
 {
   echo "FAMILY_ROOT_PATHS=${FAMILY_ROOT_PATHS}"
   echo "FAMILY_SAMPLING=${FAMILY_SAMPLING}"
   echo "FAMILY_DATASET_LENGTH=${FAMILY_DATASET_LENGTH}"
+  echo "USE_EE_HEAD=${USE_EE_HEAD:-0}"
+  if [[ "${USE_EE_HEAD:-0}" == "1" ]]; then
+    echo "EE_LOSS_WEIGHT=${EE_LOSS_WEIGHT}"
+    echo "EE_HEAD_HIDDEN_DIM=${EE_HEAD_HIDDEN_DIM}"
+  fi
 } >> "${OUTPUT_DIR}/launch_cmd.txt"
 
 echo "[INFO] RUN_NAME=${RUN_NAME}"
 echo "[INFO] OUTPUT_DIR=${OUTPUT_DIR}"
+echo "[INFO] USE_EE_HEAD=${USE_EE_HEAD:-0}"
 echo "[INFO] Launching S1-C 3:1:1:1 family-balanced training..."
 
 "${PYTHON_BIN}" -m torch.distributed.run \
@@ -188,4 +233,5 @@ echo "[INFO] Launching S1-C 3:1:1:1 family-balanced training..."
   --family_sampling "${FAMILY_SAMPLING}" \
   --family_sampling_seed 20260610 \
   --family_dataset_length "${FAMILY_DATASET_LENGTH}" \
+  "${EE_HEAD_ARGS[@]}" \
   2>&1 | tee -a "${OUTPUT_DIR}/train.log"

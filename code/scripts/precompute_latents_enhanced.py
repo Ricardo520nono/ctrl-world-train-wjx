@@ -19,11 +19,15 @@ import io
 import json
 import os
 import re
+import sys
 
 import h5py
 import numpy as np
 import torch
 from PIL import Image
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from dataset.ee_targets import ee_target_from_hdf5
 
 CAMERA_KEYS = ["head_camera", "left_camera", "right_camera"]
 IMG_SIZE = (320, 240)  # width x height -> VAE latent: 40 x 30
@@ -86,7 +90,10 @@ def process_task(task_name: str, task_src_dir: str, task_out_dir: str,
             r_pose = np.array(f["delta_ee_action/right_delta_pose"], dtype=np.float32)  # (T, 6)
             r_grip = np.array(f["delta_ee_action/right_gripper"],    dtype=np.float32)[:, None]  # (T, 1)
             action_pos = np.concatenate([l_pose, l_grip, r_pose, r_grip], axis=1)  # (T, 14)
+            ee_target = ee_target_from_hdf5(f)  # (T, 20): left/right xyz + rot6d + gripper
             T = action_pos.shape[0]
+            if ee_target.shape[0] != T:
+                raise RuntimeError(f"EE target length mismatch: action={T}, ee_target={ee_target.shape[0]}")
 
             cam_latents = {}
             for cam_key in CAMERA_KEYS:
@@ -98,7 +105,7 @@ def process_task(task_name: str, task_src_dir: str, task_out_dir: str,
         latent = torch.cat([cam_latents[k] for k in CAMERA_KEYS], dim=2)
 
         out_file = os.path.join(task_out_dir, f"ep_{ep_idx:04d}_{ep_dir}.pt")
-        torch.save({"latent": latent, "action_pos": action_pos}, out_file)
+        torch.save({"latent": latent, "action_pos": action_pos, "ee_target": ee_target}, out_file)
         meta.append({"file": out_file, "T": T, "ep_dir": ep_dir})
 
     with open(os.path.join(task_out_dir, "meta.json"), "w") as f:

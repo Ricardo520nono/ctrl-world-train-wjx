@@ -39,6 +39,7 @@ class DeltaEEDataset(Dataset):
         self.num_frames = args.num_frames
         self.T = self.num_history + self.num_frames
         self.action_dim = int(getattr(args, "action_dim", 6))
+        self.use_ee_head = args.use_ee_head
 
         stat_path = os.path.join(args.dataset_meta_info_path, args.dataset_cfgs.split("+")[0], "stat.json")
         with open(stat_path) as f:
@@ -102,16 +103,24 @@ class DeltaEEDataset(Dataset):
 
         latent_full = data["latent"]     # (T_full, 4, 90, 40)
         action_pos  = data["action_pos"] # (T_full, 14)
+        if self.use_ee_head:
+            ee_target_full = data["ee_target"] # (T_full, 20)
 
         T_actual = min(latent_full.shape[0], action_pos.shape[0])
+        if self.use_ee_head:
+            T_actual = min(T_actual, ee_target_full.shape[0])
         latent_full = latent_full[:T_actual]
         action_pos  = action_pos[:T_actual]
+        if self.use_ee_head:
+            ee_target_full = ee_target_full[:T_actual]
 
         # pad if shorter than T (edge case)
         if T_actual < self.T:
             pad = self.T - T_actual
             latent_full = torch.cat([latent_full, latent_full[-1:].repeat(pad, 1, 1, 1)], dim=0)
             action_pos  = np.concatenate([action_pos, action_pos[-1:].repeat(pad, axis=0)], axis=0)
+            if self.use_ee_head:
+                ee_target_full = np.concatenate([ee_target_full, ee_target_full[-1:].repeat(pad, axis=0)], axis=0)
             start = 0
 
         latent = latent_full[start: start + self.T]
@@ -120,8 +129,12 @@ class DeltaEEDataset(Dataset):
         action = np.clip(2 * (action - self.p01) / (self.p99 - self.p01 + 1e-8) - 1, -1, 1)
 
         task_text = task.replace("_", " ")
-        return {
+        sample = {
             "latent": latent.float(),
             "text":   task_text,
             "action": torch.tensor(action, dtype=torch.float32),
         }
+        if self.use_ee_head:
+            ee_target = ee_target_full[start: start + self.T]
+            sample["ee_target"] = torch.tensor(ee_target, dtype=torch.float32)
+        return sample
