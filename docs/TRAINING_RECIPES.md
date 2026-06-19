@@ -172,6 +172,13 @@ scripts/backfill_ee_targets.py
 
 no-head baseline `s1_c_3to1to1to1` 不读取 `ee_target`，旧缓存仍可直接使用。
 
+本地 smoke：
+
+```bash
+python3 scripts/validate_ee_head_smoke.py
+python3 scripts/validate_ee_head_forward_mock.py
+```
+
 ## s1_a_single_task
 
 启动一个单任务训练：

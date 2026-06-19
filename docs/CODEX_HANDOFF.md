@@ -165,6 +165,7 @@ python3 scripts/validate_s1c_family_pipeline.py --skip-real-inputs
 
 ```bash
 python3 scripts/validate_ee_head_smoke.py
+python3 scripts/validate_ee_head_forward_mock.py
 ```
 
 如果 S1-A/S1-B latent 已经存在，可以跑完整 S1-C pipeline 检查：
