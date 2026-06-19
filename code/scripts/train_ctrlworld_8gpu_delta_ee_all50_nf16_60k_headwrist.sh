@@ -50,7 +50,7 @@ install_pkg() {
     "${PYTHON_BIN}" -m pip install -i https://pypi.org/simple "$pkg"
 }
 
-for pkg in "transformers>=4.46.0" "accelerate>=0.34.0" "peft==0.15.2" "safetensors==0.5.3" \
+for pkg in "transformers==4.48.1" "accelerate>=0.34.0" "peft==0.15.2" "safetensors==0.5.3" \
            sentencepiece einops decord imageio mediapy omegaconf wandb h5py; do
   install_pkg "$pkg"
 done

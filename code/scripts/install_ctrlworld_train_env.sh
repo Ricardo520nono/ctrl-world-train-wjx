@@ -16,7 +16,7 @@ install_pkg() {
 }
 
 for pkg in \
-  "transformers>=4.46.0" \
+  "transformers==4.48.1" \
   "accelerate>=0.34.0" \
   "peft==0.15.2" \
   "safetensors==0.5.3" \

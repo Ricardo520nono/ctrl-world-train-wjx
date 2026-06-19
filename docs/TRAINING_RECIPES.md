@@ -177,6 +177,9 @@ no-head baseline `s1_c_3to1to1to1` 不读取 `ee_target`，旧缓存仍可直接
 ```bash
 python3 scripts/validate_ee_head_smoke.py
 python3 scripts/validate_ee_head_forward_mock.py
+python3 scripts/validate_ee_head_real_forward.py \
+  --svd_model_path /mnt/dataset/public_data/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid \
+  --clip_model_path /mnt/dataset/public_data/cscsx_projects/ctrl_world_train/assets/models/clip-vit-base-patch32
 ```
 
 ## s1_a_single_task

@@ -168,6 +168,14 @@ python3 scripts/validate_ee_head_smoke.py
 python3 scripts/validate_ee_head_forward_mock.py
 ```
 
+如果本机有 SVD / CLIP 权重，可以再跑真实单卡 forward：
+
+```bash
+python3 scripts/validate_ee_head_real_forward.py \
+  --svd_model_path /mnt/dataset/public_data/cscsx_projects/ctrl_world_train/assets/models/stable-video-diffusion-img2vid \
+  --clip_model_path /mnt/dataset/public_data/cscsx_projects/ctrl_world_train/assets/models/clip-vit-base-patch32
+```
+
 如果 S1-A/S1-B latent 已经存在，可以跑完整 S1-C pipeline 检查：
 
 ```bash
