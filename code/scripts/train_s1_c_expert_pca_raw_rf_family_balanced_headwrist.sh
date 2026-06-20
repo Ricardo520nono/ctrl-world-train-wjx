@@ -21,7 +21,8 @@ if [[ -f "${ENV_FILE}" ]]; then
   set -u
 fi
 
-if [[ -z "${WANDB_API_KEY:-}" ]]; then
+WANDB_MODE="${WANDB_MODE:-online}"
+if [[ "${WANDB_MODE}" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
   echo "[ERROR] WANDB_API_KEY is empty."
   exit 1
 fi
@@ -33,7 +34,7 @@ OUTPUT_DIR="${OUTPUT_ROOT}/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 exec > >(tee -a "${OUTPUT_DIR}/run.log") 2>&1
 
-export WANDB_MODE="online"
+export WANDB_MODE
 export WANDB_PROJECT="ctrlworld_s1"
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_RUN_NAME="${RUN_NAME}"
@@ -77,12 +78,13 @@ RAW_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_raw_s0025_train_headwrist"
 RF_UNIFORM_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_rf300_uniform_train_headwrist"
 RF_WEIGHTED_LATENT_ROOT="${CACHE_ROOT}/s1C_latents_rf300_weighted_train_headwrist"
 
-DATA_ROOT_ORIG="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/data_delta_ee/demo_clean_zed2i_visible"
-DATA_ROOT_PCA="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/perturbed_pca_gaussian/c_8_sigma_0p05"
-DATA_ROOT_RAW="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/perturbed_raw_gaussian/sigma_0p0025"
-RF_BASE="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/random_feasible_300step_5task_2ep5start_formal_v1/random_feasible_random_walk"
-DATA_ROOT_RF_UNIFORM="${RF_BASE}/rf_5task_300step_2ep5start_formal_uniform_10seed_v1"
-DATA_ROOT_RF_WEIGHTED="${RF_BASE}/rf_5task_300step_2ep5start_formal_weighted_10seed_v1"
+ACTION_FOLLOWING_BENCH_ROOT="${ACTION_FOLLOWING_BENCH_ROOT:-/mnt/dataset/public_data/cscsx_projects/data/ActionFollowingBench}"
+DATA_ROOT_ORIG="${DATA_ROOT_ORIG:-${ACTION_FOLLOWING_BENCH_ROOT}/data_delta_ee/demo_clean_zed2i_visible}"
+DATA_ROOT_PCA="${DATA_ROOT_PCA:-${ACTION_FOLLOWING_BENCH_ROOT}/EnhancedData/perturbed_pca_gaussian/c_8_sigma_0p05}"
+DATA_ROOT_RAW="${DATA_ROOT_RAW:-${ACTION_FOLLOWING_BENCH_ROOT}/EnhancedData/perturbed_raw_gaussian/sigma_0p0025}"
+RF_BASE="${RF_BASE:-${ACTION_FOLLOWING_BENCH_ROOT}/EnhancedData/random_feasible_300step_5task_2ep5start_formal_v1/random_feasible_random_walk}"
+DATA_ROOT_RF_UNIFORM="${DATA_ROOT_RF_UNIFORM:-${RF_BASE}/rf_5task_300step_2ep5start_formal_uniform_10seed_v1}"
+DATA_ROOT_RF_WEIGHTED="${DATA_ROOT_RF_WEIGHTED:-${RF_BASE}/rf_5task_300step_2ep5start_formal_weighted_10seed_v1}"
 
 echo "[INFO] Preparing expert headwrist latents..."
 for TASK in ${S1_TASKS}; do
