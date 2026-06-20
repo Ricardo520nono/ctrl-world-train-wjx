@@ -61,6 +61,8 @@ done
 echo "[INFO] Verifying runtime dependencies..."
 "${PYTHON_BIN}" -c "import diffusers,transformers,accelerate,torch,h5py; from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_synth import TextToVideoSDPipelineOutput; print('deps_ok', diffusers.__version__, torch.__version__)"
 
+PRECOMPUTE_GPUS="${PRECOMPUTE_GPUS:-8}"
+
 CAMERAS="head_camera,left_camera,right_camera"
 SVD_PATH="${ASSET_ROOT}/stable-video-diffusion-img2vid"
 META_INFO_BASE="${PROJECT_ROOT}/dataset_meta_info"
@@ -86,20 +88,41 @@ RF_BASE="${RF_BASE:-${ACTION_FOLLOWING_BENCH_ROOT}/EnhancedData/random_feasible_
 DATA_ROOT_RF_UNIFORM="${DATA_ROOT_RF_UNIFORM:-${RF_BASE}/rf_5task_300step_2ep5start_formal_uniform_10seed_v1}"
 DATA_ROOT_RF_WEIGHTED="${DATA_ROOT_RF_WEIGHTED:-${RF_BASE}/rf_5task_300step_2ep5start_formal_weighted_10seed_v1}"
 
+wait_for_background_jobs() {
+  local status=0
+  local pid
+  for pid in "$@"; do
+    if ! wait "${pid}"; then
+      status=1
+    fi
+  done
+  return "${status}"
+}
+
 echo "[INFO] Preparing expert headwrist latents..."
+expert_pids=()
+expert_idx=0
 for TASK in ${S1_TASKS}; do
   TASK_LATENT_DIR="${EXPERT_LATENT_ROOT}/${TASK}"
   if [[ -f "${TASK_LATENT_DIR}/meta.json" ]]; then
     echo "[INFO] Expert latents already exist for ${TASK}, skipping."
     continue
   fi
-  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_delta_ee.py \
-    --data_dir  "${DATA_ROOT_ORIG}/${TASK}/data" \
-    --out_dir   "${TASK_LATENT_DIR}" \
-    --svd_path  "${SVD_PATH}" \
-    --task_name "${TASK}" \
-    --cameras   "${CAMERAS}"
+  gpu_id=$((expert_idx % PRECOMPUTE_GPUS))
+  expert_idx=$((expert_idx + 1))
+  (
+    export CUDA_VISIBLE_DEVICES="${gpu_id}"
+    echo "[INFO] Expert precompute task=${TASK} gpu=${CUDA_VISIBLE_DEVICES}"
+    "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_delta_ee.py \
+      --data_dir  "${DATA_ROOT_ORIG}/${TASK}/data" \
+      --out_dir   "${TASK_LATENT_DIR}" \
+      --svd_path  "${SVD_PATH}" \
+      --task_name "${TASK}" \
+      --cameras   "${CAMERAS}"
+  ) &
+  expert_pids+=("$!")
 done
+wait_for_background_jobs "${expert_pids[@]}"
 
 precompute_enhanced_root() {
   local name="$1"
@@ -107,13 +130,31 @@ precompute_enhanced_root() {
   local out_root="$3"
 
   echo "[INFO] Pre-encoding ${name} latents: ${out_root}"
-  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_s1_pca.py \
-    --data_root   "${data_root}" \
-    --out_root    "${out_root}" \
-    --svd_path    "${SVD_PATH}" \
-    --tasks       ${S1_TASKS} \
-    --episode_min 0 --episode_max 39 \
-    --cameras     "${CAMERAS}"
+  enhanced_pids=()
+  enhanced_idx=0
+  for TASK in ${S1_TASKS}; do
+    TASK_LATENT_DIR="${out_root}/${TASK}"
+    if [[ -f "${TASK_LATENT_DIR}/meta.json" ]]; then
+      echo "[INFO] ${name} latents already exist for ${TASK}, skipping."
+      continue
+    fi
+    gpu_id=$((enhanced_idx % PRECOMPUTE_GPUS))
+    enhanced_idx=$((enhanced_idx + 1))
+    (
+      export CUDA_VISIBLE_DEVICES="${gpu_id}"
+      echo "[INFO] ${name} precompute task=${TASK} gpu=${CUDA_VISIBLE_DEVICES}"
+      "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_s1_pca.py \
+        --data_root   "${data_root}" \
+        --out_root    "${out_root}" \
+        --svd_path    "${SVD_PATH}" \
+        --tasks       ${S1_TASKS} \
+        --task_name   "${TASK}" \
+        --episode_min 0 --episode_max 39 \
+        --cameras     "${CAMERAS}"
+    ) &
+    enhanced_pids+=("$!")
+  done
+  wait_for_background_jobs "${enhanced_pids[@]}"
 }
 
 precompute_enhanced_root "pca_c8_sigma0p05" "${DATA_ROOT_PCA}" "${PCA_LATENT_ROOT}"
