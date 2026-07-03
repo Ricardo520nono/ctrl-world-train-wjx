@@ -30,7 +30,7 @@ bash scripts/launch_training.sh all50_headwrist
 底层脚本：
 
 ```bash
-scripts/train_ctrlworld_8gpu_delta_ee_all50_nf16_60k_headwrist.sh
+scripts/deprecated/train_ctrlworld_8gpu_delta_ee_all50_nf16_60k_headwrist.sh
 ```
 
 配置：
@@ -53,7 +53,7 @@ bash scripts/launch_training.sh s1_a_expert
 底层脚本：
 
 ```bash
-scripts/train_s1_a_expert_only_headwrist.sh
+scripts/deprecated/train_s1_a_expert_only_headwrist.sh
 ```
 
 配置：
@@ -75,7 +75,7 @@ bash scripts/launch_training.sh s1_b_expert_pca
 底层脚本：
 
 ```bash
-scripts/train_s1_b_expert_sliding_pca_single_headwrist.sh
+scripts/deprecated/train_s1_b_expert_sliding_pca_single_headwrist.sh
 ```
 
 配置：
@@ -97,7 +97,7 @@ bash scripts/launch_training.sh s1_c_3to1to1to1
 底层脚本：
 
 ```bash
-scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
+scripts/deprecated/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
 ```
 
 这是本次整理最重要的参考配置，对应 2026-06-10 成功跑完的 S1-C 训练。
@@ -143,7 +143,7 @@ bash scripts/launch_training.sh s1_c_ee_head
 底层脚本：
 
 ```bash
-scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist_ee_head.sh
+scripts/deprecated/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist_ee_head.sh
 ```
 
 这是 S1-C 的 EE trajectory auxiliary head 版本。默认仍使用同一套 S1 5 任务、head/left/right 三相机、`3:1:1:1` family-balanced sampler、`40000` steps 和 chunk size `16`。
@@ -216,5 +216,5 @@ watcher 脚本仍然保留。它们会把完整 checkpoint 复制到推理 check
 ```bash
 SRC=/mnt/public_ckp/cscsx_projects/ctrl_world_train/outputs/<RUN_NAME> \
 DST=/mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/<TARGET_NAME> \
-bash scripts/watch_and_copy_s1C_3to1to1to1_family_balanced_chunk16.sh
+bash scripts/deprecated/watch_and_copy_s1C_3to1to1to1_family_balanced_chunk16.sh
 ```

@@ -62,7 +62,7 @@ class wm_args:
     # num history and num future predictions
     num_frames= 5
     num_history = 6
-    action_dim = 6
+    action_dim = 14
     text_cond = True
     frame_level_cond = True
     his_cond_zero = False

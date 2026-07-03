@@ -24,9 +24,12 @@ for pkg in \
   einops \
   decord \
   imageio \
+  Pillow \
   mediapy \
   omegaconf \
   wandb \
+  pandas \
+  pyarrow \
   h5py; do
   install_pkg "${pkg}"
 done

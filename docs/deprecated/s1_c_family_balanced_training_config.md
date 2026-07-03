@@ -18,7 +18,7 @@ bash scripts/launch_training.sh s1_c_ee_head
 底层脚本：
 
 ```bash
-/mnt/public_ckp/cscsx_projects/ctrl_world_train/code/scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
+/mnt/public_ckp/cscsx_projects/ctrl_world_train/code/scripts/deprecated/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh
 ```
 
 ## 1. 训练目标
@@ -260,7 +260,7 @@ s1_C_3to1to1to1_family_balanced_headwrist_YYYYMMDD_HHMMSS
 ```bash
 SRC=/mnt/public_ckp/cscsx_projects/ctrl_world_train/outputs/<RUN_NAME> \
 DST=/mnt/public_ckp/cscsx_projects/ctrl_world_infer/checkpoints/<TARGET_NAME> \
-bash scripts/watch_and_copy_s1C_3to1to1to1_family_balanced_chunk16.sh
+bash scripts/deprecated/watch_and_copy_s1C_3to1to1to1_family_balanced_chunk16.sh
 ```
 
 ## 10. 推荐启动顺序
@@ -292,7 +292,7 @@ python3 scripts/validate_s1c_family_pipeline.py
 
 如果之后要改训练需求，优先在当前 head/left/right 主线上改：
 
-- 优先改 `scripts/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh`
+- 优先改 `scripts/deprecated/train_s1_c_expert_pca_raw_rf_family_balanced_headwrist.sh`
 - 保持 `CAMERAS="head_camera,left_camera,right_camera"`
 - 保持 `dataset_meta_info` 指向 public 包内的 `code/dataset_meta_info`
 - 大权重继续使用 public 包内 `assets/models`

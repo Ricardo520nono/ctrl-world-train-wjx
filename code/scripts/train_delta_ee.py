@@ -104,23 +104,35 @@ def main(args):
         num_params = sum(p.numel() for p in model.action_encoder.parameters())
         print(f"Number of parameters in the action_encoder: {num_params/1000000:.2f}M")
 
-    # train and val datasets — ActionFollowingBench delta-ee
-    if getattr(args, 'use_family_balanced_sampler', False):
+    # train and val datasets
+    dataset_type = getattr(args, 'dataset_type', 'delta_ee')
+    if dataset_type == 'action_following':
+        from dataset.dataset_action_following import ActionFollowingCtrlWorldDataset
+        train_dataset = ActionFollowingCtrlWorldDataset(args, mode='train')
+        val_dataset = ActionFollowingCtrlWorldDataset(args, mode='test_quick')
+    elif getattr(args, 'use_family_balanced_sampler', False):
         from dataset.dataset_delta_ee_family import DeltaEEFamilyBalancedDataset
         train_dataset = DeltaEEFamilyBalancedDataset(args, mode='train')
+        if getattr(args, 'val_episode_split', None):
+            import copy
+            val_args = copy.copy(args)
+            val_args.episode_split = args.val_episode_split
+            from dataset.dataset_delta_ee import DeltaEEDataset
+            val_dataset = DeltaEEDataset(val_args, mode='val')
+        else:
+            from dataset.dataset_delta_ee import DeltaEEDataset
+            val_dataset = DeltaEEDataset(args, mode='val')
     else:
         from dataset.dataset_delta_ee import DeltaEEDataset
         train_dataset = DeltaEEDataset(args, mode='train')
-    # val uses a separate episode split (test episodes) if val_episode_split is set
-    if getattr(args, 'val_episode_split', None):
-        import copy
-        val_args = copy.copy(args)
-        val_args.episode_split = args.val_episode_split
-        from dataset.dataset_delta_ee import DeltaEEDataset
-        val_dataset = DeltaEEDataset(val_args, mode='val')
-    else:
-        from dataset.dataset_delta_ee import DeltaEEDataset
-        val_dataset = DeltaEEDataset(args, mode='val')
+        # val uses a separate episode split (test episodes) if val_episode_split is set
+        if getattr(args, 'val_episode_split', None):
+            import copy
+            val_args = copy.copy(args)
+            val_args.episode_split = args.val_episode_split
+            val_dataset = DeltaEEDataset(val_args, mode='val')
+        else:
+            val_dataset = DeltaEEDataset(args, mode='val')
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, 
         batch_size=args.train_batch_size,
@@ -216,7 +228,7 @@ def main(args):
                     torch.save(accelerator.unwrap_model(model).state_dict(), save_path)
                     logger.info(f"Saved checkpoint to {save_path}")
                 # generate video every validation_steps
-                if global_step % args.validation_steps == 5:
+                if args.validation_steps and global_step % args.validation_steps == 5:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         model.eval()
@@ -241,7 +253,7 @@ def main(args):
             break
 
     # always save a final checkpoint at the end of training
-    if accelerator.is_main_process:
+    if accelerator.is_main_process and not getattr(args, 'skip_final_checkpoint', False):
         save_path = os.path.join(args.output_dir, f"checkpoint-final-step{global_step}.pt")
         torch.save(accelerator.unwrap_model(model).state_dict(), save_path)
         logger.info(f"[final-ckpt] Saved checkpoint to {save_path}")
@@ -362,6 +374,8 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_root_path', type=str, default=None)
     parser.add_argument('--dataset_meta_info_path', type=str, default=None)
     parser.add_argument('--dataset_cfgs', type=str, default=None)
+    parser.add_argument('--dataset_type', type=str, default=None,
+                        choices=['delta_ee', 'action_following'])
     # dataset_names
     parser.add_argument('--dataset_names', type=str, default=None)
     parser.add_argument('--output_dir', type=str, default=None)
@@ -398,9 +412,19 @@ if __name__ == "__main__":
                         help="Virtual dataset length for family-balanced sampling. Defaults to all available windows.")
     parser.add_argument('--use_abs_joint_action', action='store_true')
     parser.add_argument('--use_deepspeed', action='store_true')
+    parser.add_argument('--skip_final_checkpoint', action='store_true')
     parser.add_argument('--use_ee_head', action='store_true')
     parser.add_argument('--ee_loss_weight', type=float, default=None)
     parser.add_argument('--ee_head_hidden_dim', type=int, default=None)
+    parser.add_argument('--action_following_latent_root', type=str, default=None)
+    parser.add_argument('--action_following_train_manifest', type=str, default=None)
+    parser.add_argument('--action_following_val_manifest', type=str, default=None)
+    parser.add_argument('--action_following_stat_path', type=str, default=None)
+    parser.add_argument('--action_following_sampling_protocol', type=str, default=None,
+                        choices=['mix_3to1to1to1', 'mix_1to1to1to1', 'clean_only', 'enhanced_1to1to1'])
+    parser.add_argument('--action_following_chunk_size', type=int, default=None)
+    parser.add_argument('--action_following_dataset_length', type=int, default=None)
+    parser.add_argument('--action_following_sampling_seed', type=int, default=None)
     args_new = parser.parse_args()
     args = wm_args()
 

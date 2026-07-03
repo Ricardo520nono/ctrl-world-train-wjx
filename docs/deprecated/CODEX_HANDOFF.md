@@ -54,7 +54,7 @@ code/dataset/dataset_delta_ee_family.py
 code/scripts/precompute_latents_delta_ee.py
 code/scripts/precompute_latents_s1_pca.py
 code/scripts/backfill_ee_targets.py
-code/scripts/compute_stat_s1.py
+code/scripts/deprecated/compute_stat_s1.py
 code/scripts/compute_stat_family_roots.py
 code/models/ctrl_world.py
 code/models/ee_head.py

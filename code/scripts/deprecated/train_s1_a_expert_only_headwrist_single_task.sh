@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+source "${SCRIPT_DIR}/../ctrlworld_train_env.sh"
 
 # ============================================================================
 # S1-A single-task: expert-only, 14D abs-joint, nf=16, 40k steps.
@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
 # Checkpointing: every 1 completed epoch (step-based saving disabled).
 #
 # Usage:
-#   bash scripts/train_s1_a_expert_only_headwrist_single_task.sh <task_name>
+#   bash scripts/deprecated/train_s1_a_expert_only_headwrist_single_task.sh <task_name>
 # ============================================================================
 
 if [[ $# -ne 1 ]]; then
@@ -103,7 +103,7 @@ fi
 # ---- action stat: reuse the original S1-A stat for consistency with 5-task run ----
 if [[ ! -f "${META_INFO_BASE}/${DATASET_CFGS}/stat.json" ]]; then
   echo "[INFO] Computing S1-A stat because ${META_INFO_BASE}/${DATASET_CFGS}/stat.json is missing..."
-  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/compute_stat_s1.py \
+  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/deprecated/compute_stat_s1.py \
     --group         A \
     --expert_root   "${EXPERT_LATENT_ROOT}" \
     --tasks         click_alarmclock click_bell place_object_basket open_laptop stack_blocks_two \

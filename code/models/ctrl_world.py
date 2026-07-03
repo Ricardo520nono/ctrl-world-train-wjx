@@ -19,6 +19,14 @@ import wandb
 from models.ee_head import EETrajectoryHead, compute_ee_losses
 
 
+def load_svd_pipeline(svd_model_path):
+    try:
+        return StableVideoDiffusionPipeline.from_pretrained(svd_model_path)
+    except OSError as exc:
+        print(f"[WARN] Default SVD weights not found, retrying variant=fp16: {exc}", flush=True)
+        return StableVideoDiffusionPipeline.from_pretrained(svd_model_path, variant="fp16")
+
+
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
     """
     grid_size: int of the grid height and width
@@ -115,7 +123,7 @@ class CrtlWorld(nn.Module):
         self.args = args
 
         # load from pretrained stable video diffusion
-        self.pipeline = StableVideoDiffusionPipeline.from_pretrained(args.svd_model_path)
+        self.pipeline = load_svd_pipeline(args.svd_model_path)
         # repalce the unet to support frame_level pose condition
         print("replace the unet to support action condition and frame_level pose!")
         unet = UNetSpatioTemporalConditionModel()

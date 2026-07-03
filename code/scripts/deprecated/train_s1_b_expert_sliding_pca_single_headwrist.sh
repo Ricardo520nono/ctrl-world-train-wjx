@@ -2,15 +2,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+source "${SCRIPT_DIR}/../ctrlworld_train_env.sh"
 
 # ============================================================================
-# S1-A: expert-only, 5 tasks, 14D abs-joint, nf=16, 40k steps.
+# S1-B: expert(sliding) + PCA-perturbed(single window/episode), 5 tasks,
+# 14D abs-joint, nf=16, 40k steps.
 # Camera set: head_camera + left_camera + right_camera (head + dual wrist),
 # stacked vertically top->bottom -> latent (T,4,90,40).
 # Checkpointing: every 1 completed epoch (step-based saving disabled).
-# Derived from train_s1_a_expert_only.sh; only camera set, latent path, run
-# name and checkpoint policy differ -- all other hyper-params kept identical.
+# Derived from train_s1_b_expert_sliding_pca_single.sh; only camera set,
+# latent paths, run name and checkpoint policy differ.
 # ============================================================================
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
@@ -28,7 +29,7 @@ if [[ -z "${WANDB_API_KEY:-}" ]]; then
 fi
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
-RUN_NAME="s1_A_expert_only_headwrist_${RUN_TS}"
+RUN_NAME="s1_B_expert_sliding_pca_single_headwrist_${RUN_TS}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 
@@ -63,10 +64,12 @@ echo "[INFO] Verifying runtime dependencies..."
 # ---- camera set & paths ----
 CAMERAS="head_camera,left_camera,right_camera"   # head + dual wrist, top->bottom
 SVD_PATH="${ASSET_ROOT}/stable-video-diffusion-img2vid"
-# Dedicated root (NOT shared with the all50 headwrist job nor with S1-B) to avoid
+# Dedicated roots (NOT shared with the all50 headwrist job nor with S1-A) to avoid
 # concurrent-write corruption when both jobs are submitted at the same time.
-EXPERT_LATENT_ROOT="${CACHE_ROOT}/precomputed_latents_s1A_5tasks_14d_headwrist"
+EXPERT_LATENT_ROOT="${CACHE_ROOT}/precomputed_latents_s1B_5tasks_14d_headwrist"
+PCA_LATENT_ROOT="${CACHE_ROOT}/s1B_latents_pca_train_headwrist"
 DATA_ROOT_ORIG="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/data_delta_ee/demo_clean_zed2i_visible"
+DATA_ROOT_PCA="/mnt/public_ckp/cscsx_projects/data/ActionFollowingBench/EnhancedData/perturbed_pca_gaussian/c_8_sigma_0p05"
 META_INFO_BASE="${PROJECT_ROOT}/dataset_meta_info"
 S1_TASKS="click_alarmclock click_bell place_object_basket open_laptop stack_blocks_two"
 
@@ -86,40 +89,45 @@ for TASK in ${S1_TASKS}; do
     --cameras   "${CAMERAS}"
 done
 
-# ---- action stat: reuse (action is camera-independent), recompute only if missing ----
-if [[ ! -f "${META_INFO_BASE}/s1_A_expert_only/stat.json" ]]; then
-  echo "[INFO] Computing A-group stat..."
-  "${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/compute_stat_s1.py \
-    --group         A \
-    --expert_root   "${EXPERT_LATENT_ROOT}" \
-    --tasks         ${S1_TASKS} \
-    --episode_split 0-39 \
-    --out_dir       "${META_INFO_BASE}/s1_A_expert_only" \
-    --action_dim    14
-else
-  echo "[INFO] A-group stat.json already exists (reusing, action is camera-independent)."
+# ---- pre-encode PCA-perturbed latents (ep0-39) with new cameras (skip if exist) ----
+echo "[INFO] Pre-encoding PCA-perturbed latents (cameras=${CAMERAS}, ep0-39) for S1 tasks..."
+"${PYTHON_BIN}" ${PROJECT_ROOT}/scripts/precompute_latents_s1_pca.py \
+  --data_root   "${DATA_ROOT_PCA}" \
+  --out_root    "${PCA_LATENT_ROOT}" \
+  --svd_path    "${SVD_PATH}" \
+  --tasks       ${S1_TASKS} \
+  --episode_min 0 --episode_max 39 \
+  --cameras     "${CAMERAS}"
+
+# ---- action stat: reuse (action is camera-independent) ----
+if [[ ! -f "${META_INFO_BASE}/s1_B_expert_plus_pca/stat.json" ]]; then
+  echo "[ERROR] Expected reusable stat not found at ${META_INFO_BASE}/s1_B_expert_plus_pca/stat.json"
+  exit 1
 fi
+echo "[INFO] Reusing s1_B_expert_plus_pca stat (action is camera-independent)."
 
 # ---- training ----
 DATASET_NAMES="click_alarmclock+click_bell+place_object_basket+open_laptop+stack_blocks_two"
+DATASET_ROOT="${EXPERT_LATENT_ROOT}+${PCA_LATENT_ROOT}"
 
 printf '%s\n' "$(date): ${RUN_NAME} (cameras=${CAMERAS}, ckpt=per-epoch)" > "${OUTPUT_DIR}/launch_cmd.txt"
 echo "[INFO] RUN_NAME=${RUN_NAME}"
 echo "[INFO] OUTPUT_DIR=${OUTPUT_DIR}"
 echo "[INFO] CAMERAS=${CAMERAS}"
-echo "[INFO] Launching S1-A training (expert only, 5 tasks, nf=16, head+dual-wrist, 40k steps, ckpt per-epoch)..."
+echo "[INFO] Launching S1-B (expert sliding + pca single, 5 tasks, nf=16, head+dual-wrist, 40k steps, ckpt per-epoch)..."
 
 "${PYTHON_BIN}" -m torch.distributed.run \
   --nproc_per_node=8 \
-  --master_port=29615 \
+  --master_port=29617 \
   ${PROJECT_ROOT}/scripts/train_delta_ee.py \
   --svd_model_path    "${SVD_PATH}" \
   --clip_model_path   ${ASSET_ROOT}/clip-vit-base-patch32 \
   --ckpt_path         none \
-  --dataset_root_path "${EXPERT_LATENT_ROOT}" \
+  --dataset_root_path "${DATASET_ROOT}" \
+  --dataset_root_sampling "sliding+single" \
   --dataset_meta_info_path "${META_INFO_BASE}" \
   --dataset_names     "${DATASET_NAMES}" \
-  --dataset_cfgs      s1_A_expert_only \
+  --dataset_cfgs      s1_B_expert_plus_pca \
   --episode_split     0-39 \
   --val_episode_split 40-49 \
   --output_dir        "${OUTPUT_DIR}" \

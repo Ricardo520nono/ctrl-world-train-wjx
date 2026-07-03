@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+source "${SCRIPT_DIR}/../ctrlworld_train_env.sh"
 
 # ============================================================================
 # S1-C main experiment: expert + PCA + raw + random-feasible, 3:1:1:1

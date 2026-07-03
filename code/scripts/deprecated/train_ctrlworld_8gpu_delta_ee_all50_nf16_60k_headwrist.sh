@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/ctrlworld_train_env.sh"
+source "${SCRIPT_DIR}/../ctrlworld_train_env.sh"
 
 # ============================================================================
 # CtrlWorld delta-ee, all 50 tasks, 14D abs-joint action, nf=16, 60k steps.

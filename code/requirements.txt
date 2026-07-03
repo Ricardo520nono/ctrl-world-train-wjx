@@ -8,6 +8,10 @@ accelerate
 tqdm
 numpy
 decord
+imageio
+h5py
+Pillow
 einops
 scipy
 pandas
+pyarrow
