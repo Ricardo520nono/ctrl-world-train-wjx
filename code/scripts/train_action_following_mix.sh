@@ -21,6 +21,7 @@ fi
 
 ACTION_FOLLOWING_ROOT="${ACTION_FOLLOWING_ROOT:-/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingData/enhanced_v1_split}"
 CLEAN_LEROBOT_ROOT="${CLEAN_LEROBOT_ROOT:-/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingBench/data_lerobot/robotwin_delta_ee/demo_clean_zed2i_visible}"
+CLEAN_LEROBOT_VIDEO_ROOT="${CLEAN_LEROBOT_VIDEO_ROOT:-${CLEAN_LEROBOT_ROOT}}"
 if [[ "${PROTOCOL}" == "clean_only" ]]; then
   DEFAULT_LATENT_ROOT="${CACHE_ROOT}/action_following_chunk32_clean_only"
   DEFAULT_META_ROOT="${PROJECT_ROOT}/dataset_meta_info/action_following_chunk32_clean_only"
@@ -34,12 +35,18 @@ OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/${RUN_NAME}}"
 
 SVD_PATH="${SVD_PATH:-${ASSET_ROOT}/stable-video-diffusion-img2vid}"
 CLIP_PATH="${CLIP_PATH:-${ASSET_ROOT}/clip-vit-base-patch32}"
+TASK_INSTRUCTION_ROOT="${TASK_INSTRUCTION_ROOT:-/mnt/dataset/csx_workspace/Ideas/AF3/code/RoboTwin/description/task_instruction}"
 
-NUM_HISTORY="${NUM_HISTORY:-6}"
+NUM_HISTORY="${NUM_HISTORY:-1}"
 CHUNK_SIZE="${CHUNK_SIZE:-32}"
-NUM_FRAMES="${NUM_FRAMES:-$((CHUNK_SIZE - NUM_HISTORY))}"
-if [[ "${NUM_FRAMES}" -le 0 ]]; then
-  echo "[ERROR] CHUNK_SIZE must be larger than NUM_HISTORY." >&2
+NUM_FRAMES="${NUM_FRAMES:-${CHUNK_SIZE}}"
+if [[ "${NUM_HISTORY}" -le 0 || "${NUM_FRAMES}" -le 0 ]]; then
+  echo "[ERROR] NUM_HISTORY and NUM_FRAMES must be positive." >&2
+  exit 2
+fi
+if [[ "${NUM_FRAMES}" -ne "${CHUNK_SIZE}" && "$((NUM_HISTORY + NUM_FRAMES))" -ne "${CHUNK_SIZE}" ]]; then
+  echo "[ERROR] Unsupported ActionFollowing temporal layout: CHUNK_SIZE=${CHUNK_SIZE}, NUM_HISTORY=${NUM_HISTORY}, NUM_FRAMES=${NUM_FRAMES}." >&2
+  echo "[ERROR] Use either current-frame layout NUM_FRAMES=CHUNK_SIZE or legacy layout NUM_HISTORY+NUM_FRAMES=CHUNK_SIZE." >&2
   exit 2
 fi
 
@@ -52,6 +59,7 @@ VALIDATION_STEPS="${VALIDATION_STEPS:-2500}"
 LEARNING_RATE="${LEARNING_RATE:-1e-5}"
 MIXED_PRECISION="${MIXED_PRECISION:-bf16}"
 CKPT_PATH="${CKPT_PATH:-none}"
+ACTION_DIM="${ACTION_DIM:-14}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 MASTER_PORT="${MASTER_PORT:-29630}"
 PRECOMPUTE_BATCH_SIZE="${PRECOMPUTE_BATCH_SIZE:-16}"
@@ -84,6 +92,8 @@ if [[ ! -f "${LATENT_ROOT}/manifests/train.jsonl" ]]; then
     --out_root "${LATENT_ROOT}" \
     --enhanced_split_root "${ACTION_FOLLOWING_ROOT}" \
     --clean_lerobot_root "${CLEAN_LEROBOT_ROOT}" \
+    --clean_lerobot_video_root "${CLEAN_LEROBOT_VIDEO_ROOT}" \
+    --task_instruction_root "${TASK_INSTRUCTION_ROOT}" \
     --tasks ${TASKS} \
     --split train \
     --batch_size "${PRECOMPUTE_BATCH_SIZE}" \
@@ -103,6 +113,8 @@ if [[ "${need_quick}" == "1" && ! -f "${LATENT_ROOT}/manifests/test_quick.jsonl"
     --out_root "${LATENT_ROOT}" \
     --enhanced_split_root "${ACTION_FOLLOWING_ROOT}" \
     --clean_lerobot_root "${CLEAN_LEROBOT_ROOT}" \
+    --clean_lerobot_video_root "${CLEAN_LEROBOT_VIDEO_ROOT}" \
+    --task_instruction_root "${TASK_INSTRUCTION_ROOT}" \
     --tasks ${TASKS} \
     --split test_quick \
     --include_enhanced \
@@ -204,7 +216,7 @@ if [[ ! -f "${META_ROOT}/stat.json" ]]; then
     --latent_root "${LATENT_ROOT}" \
     --manifest "${STAT_MANIFEST}" \
     --out_dir "${META_ROOT}" \
-    --action_dim 14
+    --action_dim "${ACTION_DIM}"
 else
   echo "[INFO] Reusing existing stat: ${META_ROOT}/stat.json"
 fi
@@ -219,7 +231,7 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   --chunk_size "${CHUNK_SIZE}" \
   --num_history "${NUM_HISTORY}" \
   --num_frames "${NUM_FRAMES}" \
-  --action_dim 14 \
+  --action_dim "${ACTION_DIM}" \
   --num_samples "${SAMPLER_AUDIT_SAMPLES}" \
   --seed "${SAMPLER_AUDIT_SEED}" \
   --tolerance "${SAMPLER_AUDIT_TOLERANCE}"
@@ -230,8 +242,10 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   echo "TASKS=${TASKS}"
   echo "ACTION_FOLLOWING_ROOT=${ACTION_FOLLOWING_ROOT}"
   echo "CLEAN_LEROBOT_ROOT=${CLEAN_LEROBOT_ROOT}"
+  echo "CLEAN_LEROBOT_VIDEO_ROOT=${CLEAN_LEROBOT_VIDEO_ROOT}"
   echo "LATENT_ROOT=${LATENT_ROOT}"
   echo "META_ROOT=${META_ROOT}"
+  echo "TASK_INSTRUCTION_ROOT=${TASK_INSTRUCTION_ROOT}"
   echo "STAT_MANIFEST=${STAT_MANIFEST:-}"
   echo "INCLUDE_CLEAN=${INCLUDE_CLEAN}"
   echo "INCLUDE_ENHANCED=${INCLUDE_ENHANCED}"
@@ -240,6 +254,7 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   echo "CHUNK_SIZE=${CHUNK_SIZE}"
   echo "NUM_HISTORY=${NUM_HISTORY}"
   echo "NUM_FRAMES=${NUM_FRAMES}"
+  echo "ACTION_DIM=${ACTION_DIM}"
   echo "SAMPLER_AUDIT_SAMPLES=${SAMPLER_AUDIT_SAMPLES}"
   echo "SAMPLER_AUDIT_SEED=${SAMPLER_AUDIT_SEED}"
   echo "SAMPLER_AUDIT_TOLERANCE=${SAMPLER_AUDIT_TOLERANCE}"
@@ -270,7 +285,7 @@ echo "[INFO] Launching ${RUN_NAME}"
   --wandb_project_name ctrlworld_action_following \
   --wandb_run_name "${RUN_NAME}" \
   --tag "${RUN_NAME}" \
-  --action_dim 14 \
+  --action_dim "${ACTION_DIM}" \
   --height 240 \
   --num_history "${NUM_HISTORY}" \
   --num_frames "${NUM_FRAMES}" \

@@ -123,6 +123,23 @@ def safe_text_from_instruction(path, fallback):
     return fallback
 
 
+def task_full_description(task, instruction_root):
+    fallback = task.replace("_", " ")
+    if not instruction_root:
+        return fallback
+    path = os.path.join(instruction_root, f"{task}.json")
+    if not os.path.exists(path):
+        return fallback
+    try:
+        data = json.load(open(path))
+    except Exception:
+        return fallback
+    value = data.get("full_description")
+    if value:
+        return str(value)
+    return fallback
+
+
 def enhanced_family_subtype(asset_id, family, subtype):
     if family:
         family = str(family)
@@ -145,12 +162,17 @@ def enhanced_family_subtype(asset_id, family, subtype):
 def load_enhanced_sample(sample_dir, vae, device, batch_size, Image):
     h5_path = os.path.join(sample_dir, "data.hdf5")
     with h5py.File(h5_path, "r") as f:
-        if "delta_ee_action/vector" in f:
+        action_npy = os.path.join(sample_dir, "action.npy")
+        if os.path.exists(action_npy):
+            action_pos = np.load(action_npy).astype(np.float32)
+        elif "delta_ee_action/vector" in f:
             action_pos = np.array(f["delta_ee_action/vector"], dtype=np.float32)
         else:
-            action_pos = np.load(os.path.join(sample_dir, "action.npy")).astype(np.float32)
+            raise FileNotFoundError(f"missing action.npy and delta_ee_action/vector in {sample_dir}")
         ee_target = ee_target_from_hdf5(f)
-        T = min(len(action_pos), len(ee_target))
+        T = min(len(ee_target), len(action_pos) + 1)
+        if T <= 0:
+            raise RuntimeError(f"empty observation/action sequence in {sample_dir}")
         cam_latents = {}
         for cam_key in CAMERA_KEYS:
             rgb_bytes = f[f"observation/{cam_key}/rgb"][:T]
@@ -196,19 +218,21 @@ def read_video_frames(video_path, frame_indices, Image, VideoReader=None, cpu=No
     raise RuntimeError("Either decord or imageio is required to read LeRobot videos.")
 
 
-def load_lerobot_episode(task_root, episode_idx, vae, device, batch_size, Image, pd, VideoReader, cpu, iio):
+def load_lerobot_episode(task_root, video_task_root, episode_idx, vae, device, batch_size, Image, pd, VideoReader, cpu, iio):
     parquet_path = os.path.join(task_root, "data", "chunk-000", "file-000.parquet")
     df = pd.read_parquet(parquet_path)
     ep_df = df[df["episode_index"] == episode_idx].sort_values("frame_index")
     if ep_df.empty:
         raise RuntimeError(f"episode {episode_idx} not found in {parquet_path}")
-    action_pos = np.stack(ep_df["action"].to_numpy()).astype(np.float32)
-    T = len(action_pos)
+    action_all = np.stack(ep_df["action"].to_numpy()).astype(np.float32)
+    if len(action_all) <= 1:
+        raise RuntimeError(f"episode {episode_idx} is too short in {parquet_path}")
+    action_pos = action_all[:-1]
 
     cam_latents = {}
     frame_indices = ep_df["frame_index"].astype(int).to_numpy()
     for video_key, cam_key in zip(LEROBOT_VIDEO_KEYS, CAMERA_KEYS):
-        video_path = os.path.join(task_root, "videos", video_key, "chunk-000", "file-000.mp4")
+        video_path = os.path.join(video_task_root, "videos", video_key, "chunk-000", "file-000.mp4")
         frames = read_video_frames(video_path, frame_indices, Image, VideoReader, cpu, iio)
         cam_latents[cam_key] = encode_frames(vae, frames, device, batch_size, Image)
 
@@ -237,6 +261,8 @@ def write_record(out_file, latent, action_pos, ee_target, text, record):
         "action_pos": action_pos,
         "text": text,
         "record": record,
+        "latent_length": int(latent.shape[0]),
+        "action_length": int(action_pos.shape[0]),
     }
     if ee_target is not None:
         payload["ee_target"] = np.asarray(ee_target, dtype=np.float32)
@@ -318,7 +344,7 @@ def read_jsonl(path):
                 yield json.loads(line)
 
 
-def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae, device, batch_size, Image, overwrite):
+def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae, device, batch_size, Image, overwrite, task_instruction_root):
     manifest_path = os.path.join(out_root, "manifests", manifest_name)
     if os.path.exists(manifest_path):
         os.remove(manifest_path)
@@ -348,22 +374,21 @@ def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae,
                 task,
                 sample_id,
             )
-        text = safe_text_from_instruction(os.path.join(sample_dir, "instruction.json"), task.replace("_", " "))
+        text = task_full_description(task, task_instruction_root)
         out_file = ensure_out_path(out_root, family, subtype, task, sample_id)
         if already_done(out_file, overwrite):
             ensure_action_sidecar(out_file)
+            data = torch.load(out_file, map_location="cpu", weights_only=False)
+            action_length = int(len(np.asarray(data["action_pos"])))
+            latent_length = int(data["latent"].shape[0])
             skipped += 1
         else:
             latent, action_pos, ee_target = load_enhanced_sample(sample_dir, vae, device, batch_size, Image)
             write_record(out_file, latent, action_pos, ee_target, text, rec)
+            action_length = int(len(action_pos))
+            latent_length = int(latent.shape[0])
             processed += 1
 
-        if "length" in rec and rec["length"] is not None:
-            length = int(rec["length"])
-        elif os.path.exists(out_file):
-            length = int(len(torch.load(out_file, map_location="cpu", weights_only=False)["action_pos"]))
-        else:
-            length = 0
         fixed_start = rec.get("chunk_start")
         unit_level = "chunk" if family == "perturbed" else "trajectory"
         manifest_rec = {
@@ -373,7 +398,9 @@ def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae,
             "subtype": subtype,
             "task": task,
             "sample_id": sample_id,
-            "length": length,
+            "length": action_length,
+            "action_length": action_length,
+            "latent_length": latent_length,
             "unit_level": unit_level,
             "text": text,
         }
@@ -386,14 +413,27 @@ def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae,
     return {"records": len(records), "processed": processed, "skipped": skipped, "manifest": manifest_path}
 
 
-def load_clean_episode_infos(clean_root, tasks, limit_per_task):
+def load_clean_episode_infos(clean_root, tasks, limit_per_task, task_instruction_root):
     records = []
     for task in tasks:
         task_root = os.path.join(clean_root, task)
         info_path = os.path.join(task_root, "meta", "delta_ee_summary.json")
-        if not os.path.exists(info_path):
-            raise FileNotFoundError(info_path)
-        rows = json.load(open(info_path))
+        if os.path.exists(info_path):
+            rows = json.load(open(info_path))
+        else:
+            parquet_path = os.path.join(task_root, "data", "chunk-000", "file-000.parquet")
+            if not os.path.exists(parquet_path):
+                raise FileNotFoundError(f"missing clean summary and parquet: {info_path}, {parquet_path}")
+            import pandas as pd
+            df = pd.read_parquet(parquet_path, columns=["episode_index", "frame_index"])
+            rows = []
+            for ep, ep_df in df.groupby("episode_index", sort=True):
+                rows.append({
+                    "episode_index": int(ep),
+                    "frames": int(len(ep_df)),
+                    "actions": max(0, int(len(ep_df)) - 1),
+                    "instruction": task_full_description(task, task_instruction_root),
+                })
         for row in rows[:limit_per_task if limit_per_task is not None else len(rows)]:
             ep = int(row["episode_index"])
             length = int(row.get("actions") or max(0, int(row.get("frames", 0)) - 1))
@@ -404,12 +444,12 @@ def load_clean_episode_infos(clean_root, tasks, limit_per_task):
                 "episode_index": ep,
                 "sample_id": f"episode_{ep:04d}",
                 "length": length,
-                "text": row.get("instruction") or task.replace("_", " "),
+                "text": task_full_description(task, task_instruction_root),
             })
     return records
 
 
-def process_clean(records, clean_root, out_root, manifest_name, vae, device, batch_size, Image, pd, VideoReader, cpu, iio, overwrite):
+def process_clean(records, clean_root, clean_video_root, out_root, manifest_name, vae, device, batch_size, Image, pd, VideoReader, cpu, iio, overwrite):
     manifest_path = os.path.join(out_root, "manifests", manifest_name)
     if os.path.exists(manifest_path):
         os.remove(manifest_path)
@@ -419,14 +459,19 @@ def process_clean(records, clean_root, out_root, manifest_name, vae, device, bat
         out_file = ensure_out_path(out_root, "clean", "clean", rec["task"], rec["sample_id"])
         if already_done(out_file, overwrite):
             ensure_action_sidecar(out_file)
+            data = torch.load(out_file, map_location="cpu", weights_only=False)
+            rec["length"] = int(len(np.asarray(data["action_pos"])))
+            latent_length = int(data["latent"].shape[0])
             skipped += 1
         else:
             task_root = os.path.join(clean_root, rec["task"])
+            video_task_root = os.path.join(clean_video_root, rec["task"])
             latent, action_pos, ee_target = load_lerobot_episode(
-                task_root, rec["episode_index"], vae, device, batch_size, Image, pd, VideoReader, cpu, iio
+                task_root, video_task_root, rec["episode_index"], vae, device, batch_size, Image, pd, VideoReader, cpu, iio
             )
             write_record(out_file, latent, action_pos, ee_target, rec["text"], rec)
             rec["length"] = len(action_pos)
+            latent_length = int(latent.shape[0])
             processed += 1
         manifest_rec = {
             "file": relpath(out_file, out_root),
@@ -437,6 +482,8 @@ def process_clean(records, clean_root, out_root, manifest_name, vae, device, bat
             "sample_id": rec["sample_id"],
             "episode_index": rec["episode_index"],
             "length": int(rec["length"]),
+            "action_length": int(rec["length"]),
+            "latent_length": latent_length,
             "unit_level": "trajectory",
             "text": rec["text"],
         }
@@ -452,6 +499,7 @@ def main():
     parser.add_argument("--out_root", required=True)
     parser.add_argument("--enhanced_split_root", default="/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingData/enhanced_v1_split")
     parser.add_argument("--clean_lerobot_root", default="/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingBench/data_lerobot/robotwin_delta_ee/demo_clean_zed2i_visible")
+    parser.add_argument("--clean_lerobot_video_root", default=None)
     parser.add_argument("--tasks", nargs="+", required=True)
     parser.add_argument("--split", choices=["train", "test_quick", "both"], default="both")
     parser.add_argument("--include_clean", action="store_true")
@@ -459,6 +507,7 @@ def main():
     parser.add_argument("--limit_per_family_task", type=int, default=None)
     parser.add_argument("--clean_limit_per_task", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--task_instruction_root", default="/mnt/dataset/csx_workspace/Ideas/AF3/code/RoboTwin/description/task_instruction")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_index", type=int, default=0)
@@ -472,6 +521,7 @@ def main():
 
     include_clean = args.include_clean or not args.include_enhanced
     include_enhanced = args.include_enhanced or not args.include_clean
+    clean_video_root = args.clean_lerobot_video_root or args.clean_lerobot_root
     os.makedirs(args.out_root, exist_ok=True)
 
     Image = import_image_modules()
@@ -485,7 +535,9 @@ def main():
 
     summary = {}
     if include_clean and args.split in {"train", "both"}:
-        clean_records = load_clean_episode_infos(args.clean_lerobot_root, args.tasks, args.clean_limit_per_task)
+        clean_records = load_clean_episode_infos(
+            args.clean_lerobot_root, args.tasks, args.clean_limit_per_task, args.task_instruction_root
+        )
         clean_records = shard_records(
             clean_records,
             args.num_shards,
@@ -493,7 +545,7 @@ def main():
             lambda rec: f"clean|{rec['task']}|{rec['episode_index']}",
         )
         summary["clean_train"] = process_clean(
-            clean_records, args.clean_lerobot_root, args.out_root,
+            clean_records, args.clean_lerobot_root, clean_video_root, args.out_root,
             manifest_with_suffix("clean_train.jsonl", args.manifest_suffix),
             vae, device, args.batch_size, Image, pd, VideoReader, cpu, iio, args.overwrite
         )
@@ -510,7 +562,7 @@ def main():
         summary["enhanced_train"] = process_enhanced(
             records, args.enhanced_split_root, args.out_root,
             manifest_with_suffix("enhanced_train.jsonl", args.manifest_suffix),
-            vae, device, args.batch_size, Image, args.overwrite
+            vae, device, args.batch_size, Image, args.overwrite, args.task_instruction_root
         )
 
     if include_enhanced and args.split in {"test_quick", "both"}:
@@ -525,7 +577,7 @@ def main():
         summary["test_quick"] = process_enhanced(
             records, args.enhanced_split_root, args.out_root,
             manifest_with_suffix("test_quick.jsonl", args.manifest_suffix),
-            vae, device, args.batch_size, Image, args.overwrite
+            vae, device, args.batch_size, Image, args.overwrite, args.task_instruction_root
         )
 
     if args.split in {"train", "both"} and not args.skip_train_merge:

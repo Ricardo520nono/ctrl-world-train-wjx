@@ -173,11 +173,12 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         if not self.latent_root:
             raise ValueError("--action_following_latent_root is required")
 
-        chunk_size = int(getattr(args, "action_following_chunk_size", self.T) or self.T)
-        if chunk_size != self.T:
+        chunk_size = int(getattr(args, "action_following_chunk_size", self.num_frames) or self.num_frames)
+        self.action_T = int(getattr(args, "action_following_action_chunk_size", 0) or chunk_size)
+        if chunk_size != self.action_T:
             raise ValueError(
-                f"ActionFollowing chunk_size={chunk_size} but num_history+num_frames={self.T}. "
-                "For chunk32 with Ctrl-World history=6, use --num_frames 26."
+                f"ActionFollowing chunk_size={chunk_size} but action_T={self.action_T}. "
+                "For current-frame chunk32 training, use --num_history 1 --num_frames 32."
             )
 
         manifest_path = self._manifest_path(args, mode)
@@ -238,8 +239,10 @@ class ActionFollowingCtrlWorldDataset(Dataset):
     def _num_windows(self, rec):
         if rec["_sampling_mode"] in {"fixed", "prefix"}:
             return 1
-        length = int(rec.get("length", 0))
-        return max(1, length - self.T + 1)
+        action_length = int(rec.get("action_length", rec.get("length", 0)))
+        latent_length = int(rec.get("latent_length", action_length))
+        max_start = min(action_length - self.action_T, latent_length - self.T)
+        return max(1, max_start + 1)
 
     def _build_index(self, records):
         by_family = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
@@ -343,7 +346,10 @@ class ActionFollowingCtrlWorldDataset(Dataset):
             counts[rec["_family"]] += 1
             windows[rec["_family"]] += rec["_nwin"]
         print("[ActionFollowingCtrlWorldDataset]")
-        print(f"  mode={self.mode}, protocol={self.protocol}, T={self.T}, virtual_length={self.virtual_length}")
+        print(
+            f"  mode={self.mode}, protocol={self.protocol}, "
+            f"latent_T={self.T}, action_T={self.action_T}, virtual_length={self.virtual_length}"
+        )
         print(f"  manifest={manifest_path}")
         print(f"  sampler_family_prob={dict(zip(self.family_names, self.family_p.tolist()))}")
         if not self.eval_mode:
@@ -436,26 +442,32 @@ class ActionFollowingCtrlWorldDataset(Dataset):
                 )
             ee_target_full = np.asarray(data["ee_target"], dtype=np.float32)
 
-        T_actual = min(int(latent_full.shape[0]), int(action_pos.shape[0]))
+        latent_actual = int(latent_full.shape[0])
+        action_actual = int(action_pos.shape[0])
         if self.use_ee_head:
-            T_actual = min(T_actual, int(ee_target_full.shape[0]))
-        latent_full = latent_full[:T_actual]
-        action_pos = action_pos[:T_actual]
+            latent_actual = min(latent_actual, int(ee_target_full.shape[0]))
+        latent_full = latent_full[:latent_actual]
+        action_pos = action_pos[:action_actual]
         if self.use_ee_head:
-            ee_target_full = ee_target_full[:T_actual]
+            ee_target_full = ee_target_full[:latent_actual]
 
-        if T_actual < self.T:
-            pad = self.T - T_actual
+        if latent_actual < self.T:
+            pad = self.T - latent_actual
             latent_full = torch.cat([latent_full, latent_full[-1:].repeat(pad, 1, 1, 1)], dim=0)
-            action_pos = np.concatenate([action_pos, action_pos[-1:].repeat(pad, axis=0)], axis=0)
             if self.use_ee_head:
                 ee_target_full = np.concatenate([ee_target_full, ee_target_full[-1:].repeat(pad, axis=0)], axis=0)
-            T_actual = self.T
+            latent_actual = self.T
+            start = 0
+        if action_actual < self.action_T:
+            pad = self.action_T - action_actual
+            action_pos = np.concatenate([action_pos, action_pos[-1:].repeat(pad, axis=0)], axis=0)
+            action_actual = self.action_T
             start = 0
 
-        start = min(max(0, int(start)), max(0, T_actual - self.T))
+        max_start = max(0, min(latent_actual - self.T, action_actual - self.action_T))
+        start = min(max(0, int(start)), max_start)
         latent = latent_full[start:start + self.T]
-        action = action_pos[start:start + self.T, : self.action_dim]
+        action = action_pos[start:start + self.action_T, : self.action_dim]
         action = np.clip(2 * (action - self.p01) / (self.p99 - self.p01 + 1e-8) - 1, -1, 1)
 
         sample = {

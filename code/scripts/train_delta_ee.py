@@ -287,15 +287,30 @@ def validate_video_generation(model, val_dataset, args, train_steps, videos_dir,
     text = [t['text'] for i,t in enumerate(batch_list)]
     actions = torch.cat([t['action'].unsqueeze(0) for i,t in enumerate(batch_list)],dim=0).to(device, non_blocking=True)
     his_latent_gt, future_latent_ft = video_gt[:,:args.num_history], video_gt[:,args.num_history:]
-    current_latent = future_latent_ft[:,0]
+    current_latent = his_latent_gt[:,-1]
     print("image",current_latent.shape, 'action', actions.shape)
     assert current_latent.shape[1:] == (4, 90, 40)
-    assert actions.shape[1:] == (int(args.num_frames+args.num_history), args.action_dim)
+    assert actions.shape[-1] == args.action_dim
 
     # start generate
     with torch.no_grad():
         bsz = actions.shape[0]
         action_latent = model.module.action_encoder(actions, text, model.module.tokenizer, model.module.text_encoder, args.frame_level_cond) if accelerator.num_processes > 1 else model.action_encoder(actions, text, model.tokenizer, model.text_encoder,args.frame_level_cond) # (8, 1, 1024)
+        expected_cond_frames = int(args.num_history + args.num_frames)
+        if args.frame_level_cond and action_latent.shape[1] == args.num_frames and args.num_history > 0:
+            history_latent = torch.zeros(
+                action_latent.shape[0],
+                args.num_history,
+                action_latent.shape[2],
+                device=action_latent.device,
+                dtype=action_latent.dtype,
+            )
+            action_latent = torch.cat([history_latent, action_latent], dim=1)
+        if args.frame_level_cond and action_latent.shape[1] != expected_cond_frames:
+            raise RuntimeError(
+                f"frame-level action condition has {action_latent.shape[1]} frames, "
+                f"expected {expected_cond_frames}"
+            )
         print("action_latent",action_latent.shape)
 
         _, pred_latents = CtrlWorldDiffusionPipeline.__call__(

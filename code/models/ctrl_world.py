@@ -147,8 +147,10 @@ class CrtlWorld(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(args.clip_model_path,use_fast=False)
         self.text_encoder.requires_grad_(False)
 
-        # initialize an action projector
-        self.action_encoder = Action_encoder2(action_dim=args.action_dim, action_num=int(args.num_history+args.num_frames), hidden_size=1024, text_cond=args.text_cond)
+        # initialize an action projector. ActionFollowing uses current frame +
+        # future actions: action length is num_frames, while UNet frame-level
+        # conditioning still needs num_history + num_frames tokens.
+        self.action_encoder = Action_encoder2(action_dim=args.action_dim, action_num=int(args.num_frames), hidden_size=1024, text_cond=args.text_cond)
         self.use_ee_head = args.use_ee_head
         if self.use_ee_head:
             self.ee_head = EETrajectoryHead(hidden_dim=int(args.ee_head_hidden_dim))
@@ -167,8 +169,8 @@ class CrtlWorld(nn.Module):
         num_history  = self.args.num_history
         latents = latents.to(device=device, dtype=dtype) #[B, num_history + num_frames]
 
-        # current img as condition image to stack at channel wise, add random noise to current image, noise strength 0.0~0.2
-        current_img = latents[:,num_history:(num_history+1)] # (B, 1, 4, 32, 32)
+        # current image condition is the observed history frame, not a future frame.
+        current_img = latents[:,num_history-1:num_history] # (B, 1, 4, 32, 32)
         bsz,num_frames = latents.shape[:2]
         current_img = current_img[:,0] # (B, 4, 32, 32)
         sigma = torch.rand([bsz, 1, 1, 1], device=device, dtype=dtype) * 0.2
@@ -183,6 +185,21 @@ class CrtlWorld(nn.Module):
         action = batch['action'] # (B, f, 7)
         action = action.to(device)
         action_hidden = self.action_encoder(action, texts, self.tokenizer, self.text_encoder, frame_level_cond=self.args.frame_level_cond) # (B, f, 1024)
+        expected_cond_frames = int(num_history + self.args.num_frames)
+        if self.args.frame_level_cond and action_hidden.shape[1] == self.args.num_frames and num_history > 0:
+            history_hidden = torch.zeros(
+                action_hidden.shape[0],
+                num_history,
+                action_hidden.shape[2],
+                device=action_hidden.device,
+                dtype=action_hidden.dtype,
+            )
+            action_hidden = torch.cat([history_hidden, action_hidden], dim=1)
+        if self.args.frame_level_cond and action_hidden.shape[1] != expected_cond_frames:
+            raise RuntimeError(
+                f"frame-level action condition has {action_hidden.shape[1]} frames, "
+                f"expected {expected_cond_frames}"
+            )
 
         # for classifier-free guidance, with 5% probability, set action_hidden to 0
         uncond_hidden_states = torch.zeros_like(action_hidden)

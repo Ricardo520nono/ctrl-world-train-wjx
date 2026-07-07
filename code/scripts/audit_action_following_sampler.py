@@ -41,6 +41,7 @@ def main():
         action_following_stat_path=cli.stat_path,
         action_following_sampling_protocol=cli.protocol,
         action_following_chunk_size=cli.chunk_size,
+        action_following_action_chunk_size=cli.chunk_size,
         action_following_dataset_length=0,
         action_following_sampling_seed=cli.seed,
     )
