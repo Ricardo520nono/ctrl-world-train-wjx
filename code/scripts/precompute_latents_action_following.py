@@ -42,6 +42,7 @@ ASSET_FAMILY = {
     "random_feasible_300step_uniform_2ep5start_10seed_v1": ("random_feasible", "uniform"),
     "random_feasible_300step_weighted_2ep5start_10seed_v1": ("random_feasible", "weighted"),
     "counterfactual_replay_50task_20src5seed_v1": ("counterfactual_replay", None),
+    "exploration_policy_rollout_starvla_official48_step150000_50task10traj_v1": ("exploration", "policy_rollout"),
 }
 
 
@@ -125,13 +126,15 @@ def safe_text_from_instruction(path, fallback):
 def enhanced_family_subtype(asset_id, family, subtype):
     if family:
         family = str(family)
-    if family in {"perturbed", "random_feasible", "counterfactual_replay"}:
+    if family in {"perturbed", "random_feasible", "counterfactual_replay", "exploration"}:
         return family, subtype
     if asset_id in ASSET_FAMILY:
         return ASSET_FAMILY[asset_id]
     text = f"{asset_id} {family}".lower()
     if "counterfactual" in text:
         return "counterfactual_replay", None
+    if "exploration" in text or "policy_rollout" in text:
+        return "exploration", "policy_rollout"
     if "random_feasible" in text:
         return "random_feasible", "weighted" if "weighted" in text else "uniform"
     if "perturbed" in text or "pca" in text or "raw" in text:

@@ -10,8 +10,8 @@ Usage:
   bash scripts/launch_training.sh <recipe> [task]
 
 Recipes:
-  action_following_mix3  formal ActionFollowingData, clean:enhanced = 1:1, chunk32
-  action_following_mix1  formal ActionFollowingData, clean:3 enhanced families = 1:1:1:1, chunk32
+  action_following_mix4  formal ActionFollowingData, clean:enhanced = 1:1, four enhanced families, chunk32
+  action_following_mix1  formal ActionFollowingData, clean:4 enhanced families = 1:1:1:1:1, chunk32
   action_following_clean formal ActionFollowingData, clean-only baseline, chunk32
   all50_headwrist       deprecated historical recipe: 50 tasks, expert, chunk16, 60k steps
   s1_a_expert           deprecated historical recipe: 5 tasks, expert-only, chunk16, 40k steps
@@ -28,7 +28,7 @@ Single-task names:
   stack_blocks_two
 
 Examples:
-  bash scripts/launch_training.sh action_following_mix3
+  bash scripts/launch_training.sh action_following_mix4
   bash scripts/launch_training.sh action_following_mix1
   bash scripts/launch_training.sh s1_c_3to1to1to1
   bash scripts/launch_training.sh s1_c_ee_head
@@ -45,11 +45,14 @@ recipe="$1"
 task="${2:-}"
 
 case "${recipe}" in
+  action_following_mix4)
+    exec bash "${SCRIPT_DIR}/train_action_following_mix.sh" mix_4to1to1to1to1
+    ;;
   action_following_mix3)
     exec bash "${SCRIPT_DIR}/train_action_following_mix.sh" mix_3to1to1to1
     ;;
   action_following_mix1)
-    exec bash "${SCRIPT_DIR}/train_action_following_mix.sh" mix_1to1to1to1
+    exec bash "${SCRIPT_DIR}/train_action_following_mix.sh" mix_1to1to1to1to1
     ;;
   action_following_clean)
     INCLUDE_ENHANCED=0 exec bash "${SCRIPT_DIR}/train_action_following_mix.sh" clean_only

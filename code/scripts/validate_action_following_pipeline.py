@@ -20,6 +20,7 @@ FAMILIES = [
     ("random_feasible", "uniform", 64),
     ("random_feasible", "weighted", 64),
     ("counterfactual_replay", None, 72),
+    ("exploration", "policy_rollout", 96),
 ]
 
 
@@ -112,8 +113,10 @@ def check(protocol):
 
 
 def main():
-    check("mix_3to1to1to1")
-    check("mix_1to1to1to1")
+    check("mix_4to1to1to1to1")
+    check("mix_1to1to1to1to1")
+    check("enhanced_1to1to1to1")
+    check("clean_only")
     print("[OK] ActionFollowing Ctrl-World dataset validation passed.")
 
 

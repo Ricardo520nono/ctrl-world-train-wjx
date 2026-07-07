@@ -77,7 +77,8 @@ def main(args):
 
     # model and optimizer
     model = CrtlWorld(args)
-    if args.ckpt_path is not None:
+    ckpt_path = getattr(args, "ckpt_path", None)
+    if ckpt_path and str(ckpt_path).lower() not in {"none", "null"}:
         print(f"Loading checkpoint from {args.ckpt_path}!")
         state_dict = torch.load(args.ckpt_path, map_location='cpu')
         model.load_state_dict(state_dict, strict=True)
@@ -421,7 +422,15 @@ if __name__ == "__main__":
     parser.add_argument('--action_following_val_manifest', type=str, default=None)
     parser.add_argument('--action_following_stat_path', type=str, default=None)
     parser.add_argument('--action_following_sampling_protocol', type=str, default=None,
-                        choices=['mix_3to1to1to1', 'mix_1to1to1to1', 'clean_only', 'enhanced_1to1to1'])
+                        choices=[
+                            'mix_4to1to1to1to1',
+                            'mix_1to1to1to1to1',
+                            'enhanced_1to1to1to1',
+                            'mix_3to1to1to1',
+                            'mix_1to1to1to1',
+                            'clean_only',
+                            'enhanced_1to1to1',
+                        ])
     parser.add_argument('--action_following_chunk_size', type=int, default=None)
     parser.add_argument('--action_following_dataset_length', type=int, default=None)
     parser.add_argument('--action_following_sampling_seed', type=int, default=None)
