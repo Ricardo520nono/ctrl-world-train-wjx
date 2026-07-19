@@ -56,7 +56,10 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=8, help="diffusion steps; raise for higher-quality videos")
     parser.add_argument("--seed", type=int, default=20260708)
     parser.add_argument("--max_actions", type=int, default=0, help="0 means replay the full trajectory")
-    parser.add_argument("--chunk_size", type=int, default=32)
+    parser.add_argument("--chunk_size", type=int, default=32, help="backward-compatible action chunk size")
+    parser.add_argument("--num_history", type=int, default=1)
+    parser.add_argument("--num_frames", type=int, default=None, help="future frames per model call; defaults to chunk_size")
+    parser.add_argument("--action_chunk_size", type=int, default=None, help="action tokens per model call; defaults to chunk_size")
     parser.add_argument("--action_dim", type=int, default=20)
     parser.add_argument("--decode_chunk", type=int, default=7)
     parser.add_argument("--fps", type=int, default=2)
@@ -80,6 +83,8 @@ def resolve_under(root: Path, path: str | Path) -> Path:
 
 def make_args(cli, out_dir: Path):
     args = wm_args()
+    num_frames = int(cli.num_frames or cli.chunk_size)
+    action_chunk_size = int(cli.action_chunk_size or cli.chunk_size)
     args.svd_model_path = str(ASSET_ROOT / "stable-video-diffusion-img2vid")
     args.clip_model_path = str(ASSET_ROOT / "clip-vit-base-patch32")
     args.dataset_type = "action_following"
@@ -89,10 +94,10 @@ def make_args(cli, out_dir: Path):
     args.output_dir = str(out_dir)
     args.action_following_latent_root = str(cli.latent_root)
     args.action_following_stat_path = str(cli.stat)
-    args.action_following_chunk_size = int(cli.chunk_size)
-    args.action_following_action_chunk_size = int(cli.chunk_size)
-    args.num_history = 1
-    args.num_frames = int(cli.chunk_size)
+    args.action_following_chunk_size = action_chunk_size
+    args.action_following_action_chunk_size = action_chunk_size
+    args.num_history = int(cli.num_history)
+    args.num_frames = num_frames
     args.action_dim = int(cli.action_dim)
     args.height = 240
     args.width = 320
@@ -146,13 +151,14 @@ def load_record(cli):
     if actions.ndim != 2 or actions.shape[1] < cli.action_dim:
         raise RuntimeError(f"expected actions [T,{cli.action_dim}+], got {actions.shape} from {data_path}")
 
-    usable_actions = min(actions.shape[0], latent.shape[0] - 1)
+    action_limit = min(actions.shape[0], latent.shape[0])
+    total_future = max(0, latent.shape[0] - int(cli.num_history))
     if cli.max_actions > 0:
-        usable_actions = min(usable_actions, int(cli.max_actions))
-    if usable_actions <= 0:
+        total_future = min(total_future, int(cli.max_actions))
+    if total_future <= 0:
         raise RuntimeError(f"record has no usable action/latent pairs: {data_path}")
 
-    return rec, data_path, latent[: usable_actions + 1], actions[:usable_actions, : cli.action_dim], text
+    return rec, data_path, latent[: int(cli.num_history) + total_future], actions[:action_limit, : cli.action_dim], text
 
 
 def normalize_actions(actions: np.ndarray, stat_path: Path, action_dim: int) -> np.ndarray:
@@ -179,25 +185,32 @@ def encode_action_condition(model, args, action, text):
     return action_latent
 
 
-def pad_action_chunk(chunk: np.ndarray, chunk_size: int) -> tuple[np.ndarray, int]:
+def pad_action_chunk(chunk: np.ndarray, action_chunk_size: int) -> np.ndarray:
     valid = int(chunk.shape[0])
-    if valid == chunk_size:
-        return chunk, valid
+    if valid == action_chunk_size:
+        return chunk
     if valid <= 0:
         raise RuntimeError("empty action chunk")
-    pad = np.repeat(chunk[-1:], chunk_size - valid, axis=0)
-    return np.concatenate([chunk, pad], axis=0), valid
+    pad = np.repeat(chunk[-1:], action_chunk_size - valid, axis=0)
+    return np.concatenate([chunk, pad], axis=0)
 
 
 @torch.no_grad()
 def autoregressive_replay(model, args, actions_norm: np.ndarray, init_latent: torch.Tensor, text: str, cli):
     device = next(model.unet.parameters()).device
     dtype = torch.bfloat16
-    current = init_latent[None, None].to(device=device, dtype=dtype)
+    num_history = int(args.num_history)
+    num_frames = int(args.num_frames)
+    action_chunk_size = int(cli.action_chunk_size or cli.chunk_size)
+    total_future = int(getattr(cli, "_total_future", actions_norm.shape[0]))
+    current = init_latent[None].to(device=device, dtype=dtype)
+    if current.ndim != 5 or current.shape[1] != num_history:
+        raise RuntimeError(f"expected initial history [H,C,h,w] with H={num_history}, got {tuple(init_latent.shape)}")
     pred_chunks = []
 
-    for chunk_id, start in enumerate(range(0, actions_norm.shape[0], cli.chunk_size)):
-        chunk, valid = pad_action_chunk(actions_norm[start : start + cli.chunk_size], cli.chunk_size)
+    for chunk_id, start in enumerate(range(0, total_future, num_frames)):
+        valid = min(num_frames, total_future - start)
+        chunk = pad_action_chunk(actions_norm[start : start + action_chunk_size], action_chunk_size)
         action = torch.tensor(chunk, device=device, dtype=dtype).unsqueeze(0)
         action_latent = encode_action_condition(model, args, action, text)
         generator = torch.Generator(device=device).manual_seed(int(cli.seed) + chunk_id)
@@ -208,7 +221,7 @@ def autoregressive_replay(model, args, actions_norm: np.ndarray, init_latent: to
             text=action_latent,
             width=args.width,
             height=3 * args.height,
-            num_frames=args.num_frames,
+            num_frames=num_frames,
             history=current,
             num_inference_steps=cli.steps,
             decode_chunk_size=cli.decode_chunk,
@@ -224,10 +237,10 @@ def autoregressive_replay(model, args, actions_norm: np.ndarray, init_latent: to
 
         keep = future[:, :valid].to(dtype)
         pred_chunks.append(keep.cpu())
-        current = keep[:, -1:].to(device=device, dtype=dtype)
+        current = torch.cat([current, keep], dim=1)[:, -num_history:].to(device=device, dtype=dtype)
         print(f"[autoregressive] chunk={chunk_id} action_range=[{start},{start + valid})", flush=True)
 
-    return torch.cat([init_latent[None, None].cpu(), torch.cat(pred_chunks, dim=1)], dim=1)
+    return torch.cat([init_latent[None].cpu(), torch.cat(pred_chunks, dim=1)], dim=1)
 
 
 def decode_latents(pipeline, latents, chunk=7):
@@ -262,11 +275,12 @@ def main():
     args = make_args(cli, out)
 
     rec, data_path, gt_latent, actions, text = load_record(cli)
+    cli._total_future = int(gt_latent.shape[0] - int(cli.num_history))
     actions_norm = normalize_actions(actions, cli.stat, cli.action_dim)
     model = load_model(args, cli.ckpt, device)
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
-        pred_latent = autoregressive_replay(model, args, actions_norm, gt_latent[0], text, cli)
+        pred_latent = autoregressive_replay(model, args, actions_norm, gt_latent[: int(cli.num_history)], text, cli)
 
     gt_latent = gt_latent[None, : pred_latent.shape[1]].cpu()
     mse = torch.mean((pred_latent[:, 1:].float() - gt_latent[:, 1:].float()) ** 2).item()
@@ -305,6 +319,9 @@ def main():
         "text": text,
         "action_dim": int(cli.action_dim),
         "chunk_size": int(cli.chunk_size),
+        "num_history": int(cli.num_history),
+        "num_frames": int(cli.num_frames or cli.chunk_size),
+        "action_chunk_size": int(cli.action_chunk_size or cli.chunk_size),
         "num_actions": int(actions.shape[0]),
         "num_video_frames": int(pred_latent.shape[1]),
         "num_inference_steps": int(cli.steps),
