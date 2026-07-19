@@ -68,6 +68,19 @@ CLEAN_LIMIT_PER_TASK="${CLEAN_LIMIT_PER_TASK:-}"
 SAMPLER_AUDIT_SAMPLES="${SAMPLER_AUDIT_SAMPLES:-10000}"
 SAMPLER_AUDIT_SEED="${SAMPLER_AUDIT_SEED:-20260630}"
 SAMPLER_AUDIT_TOLERANCE="${SAMPLER_AUDIT_TOLERANCE:-0.02}"
+REQUIRE_WANDB_ONLINE="${REQUIRE_WANDB_ONLINE:-0}"
+
+if [[ "${REQUIRE_WANDB_ONLINE}" == "1" ]]; then
+  if [[ "${WANDB_MODE:-online}" != "online" ]]; then
+    echo "[ERROR] Formal training requires WANDB_MODE=online; got ${WANDB_MODE:-unset}." >&2
+    exit 2
+  fi
+  if [[ -z "${WANDB_API_KEY:-}" ]]; then
+    echo "[ERROR] Formal training requires WANDB_API_KEY from ${CTRLWORLD_ENV_FILE}." >&2
+    exit 2
+  fi
+  echo "[INFO] W&B online preflight passed: project=ctrlworld_action_following run=${RUN_NAME}"
+fi
 
 mkdir -p "${LATENT_ROOT}" "${META_ROOT}" "${OUTPUT_DIR}"
 
@@ -258,6 +271,9 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   echo "SAMPLER_AUDIT_SAMPLES=${SAMPLER_AUDIT_SAMPLES}"
   echo "SAMPLER_AUDIT_SEED=${SAMPLER_AUDIT_SEED}"
   echo "SAMPLER_AUDIT_TOLERANCE=${SAMPLER_AUDIT_TOLERANCE}"
+  echo "WANDB_MODE=${WANDB_MODE:-online}"
+  echo "WANDB_PROJECT=ctrlworld_action_following"
+  echo "WANDB_RUN_NAME=${RUN_NAME}"
   echo "CKPT_PATH=${CKPT_PATH}"
 } > "${OUTPUT_DIR}/launch_cmd.txt"
 

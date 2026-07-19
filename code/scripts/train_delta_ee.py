@@ -90,7 +90,7 @@ def main(args):
     if accelerator.is_main_process:
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         tag = args.tag
-        run_name = f"train_{now}_{tag}"
+        run_name = args.wandb_run_name or f"train_{now}_{tag}"
         accelerator.init_trackers(args.wandb_project_name,config={}, init_kwargs={"wandb":{"name":run_name}})
         os.makedirs(args.output_dir, exist_ok=True)
         # count parameters num in each part
