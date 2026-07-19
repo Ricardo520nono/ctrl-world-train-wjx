@@ -13,6 +13,10 @@ MANIFEST_PATH="${MANIFEST_PATH:-${LATENT_ROOT}/manifests/clean_train.jsonl}"
 OUT_ROOT="${OUT_ROOT:?OUT_ROOT is required}"
 
 POLICY_CKPT="${POLICY_CKPT:-/mnt/dataset/csx_workspace/Ideas/data_AF3/starVLA_dev/checkpoints/qwenoft_rot6d20_clean50_randomized500_decord_lru8_nofuture_locality_b4_official_48g_bs4/ACWM_T2A_qwenoft_rot6d20_clean50_randomized500_decord_lru8_nofuture_locality_b4_official_48g_bs4_20260709/checkpoints/steps_90000_pytorch_model.pt}"
+POLICY_RUN_DIR="$(cd "$(dirname "${POLICY_CKPT}")/.." && pwd)"
+POLICY_STAT_PATH="${POLICY_STAT_PATH:-${POLICY_RUN_DIR}/dataset_statistics.json}"
+POLICY_STAT_KEY="${POLICY_STAT_KEY:-new_embodiment}"
+POLICY_VIEW_ORDER="${POLICY_VIEW_ORDER:-cam_high,cam_left_wrist,cam_right_wrist}"
 POLICY_BASE_VLM="${POLICY_BASE_VLM:-/mnt/dataset/public_data/Qwen3-VL-4B-Instruct}"
 POLICY_LEGACY_BASE_VLM="${POLICY_LEGACY_BASE_VLM:-/mnt/public_ckp/Qwen3-VL-4B-Instruct}"
 STARVLA_ROOT="${STARVLA_ROOT:-/mnt/dataset/csx_workspace/Ideas/AF3/code/starVLA_dev}"
@@ -42,6 +46,7 @@ for path in \
   "${MANIFEST_PATH}" \
   "${STAT_PATH}" \
   "${POLICY_CKPT}" \
+  "${POLICY_STAT_PATH}" \
   "${POLICY_BASE_VLM}" \
   "${STARVLA_ROOT}" \
   "${STARVLA_PYTHON}" \
@@ -66,6 +71,8 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   echo "[DRY_RUN] task=${TASK} sample_index=${SAMPLE_INDEX}"
   echo "[DRY_RUN] wm_ckpt=${WM_CKPT}"
   echo "[DRY_RUN] policy_ckpt=${POLICY_CKPT}"
+  echo "[DRY_RUN] policy_stat=${POLICY_STAT_PATH} key=${POLICY_STAT_KEY}"
+  echo "[DRY_RUN] policy_view_order=${POLICY_VIEW_ORDER}"
   echo "[DRY_RUN] policy_base_vlm=${POLICY_BASE_VLM} legacy_path=${POLICY_LEGACY_BASE_VLM}"
   echo "[DRY_RUN] latent_root=${LATENT_ROOT}"
   echo "[DRY_RUN] manifest=${MANIFEST_PATH}"
@@ -97,6 +104,9 @@ TASK=${TASK}
 SAMPLE_INDEX=${SAMPLE_INDEX}
 WM_CKPT=${WM_CKPT}
 POLICY_CKPT=${POLICY_CKPT}
+POLICY_STAT_PATH=${POLICY_STAT_PATH}
+POLICY_STAT_KEY=${POLICY_STAT_KEY}
+POLICY_VIEW_ORDER=${POLICY_VIEW_ORDER}
 POLICY_BASE_VLM=${POLICY_BASE_VLM}
 POLICY_LEGACY_BASE_VLM=${POLICY_LEGACY_BASE_VLM}
 LATENT_ROOT=${LATENT_ROOT}
@@ -217,6 +227,9 @@ CUDA_VISIBLE_DEVICES="${CLOSED_GPU}" "${CTRLWORLD_PYTHON}" scripts/replay_policy
   --policy_mode vla \
   --policy_num_ddim_steps "${POLICY_DDIM_STEPS}" \
   --policy_ckpt "${POLICY_CKPT}" \
+  --policy_stat "${POLICY_STAT_PATH}" \
+  --policy_stat_key "${POLICY_STAT_KEY}" \
+  --policy_view_order "${POLICY_VIEW_ORDER}" \
   --policy_bridge_python "${STARVLA_PYTHON}" \
   --starvla_root "${STARVLA_ROOT}" \
   --out "${CLOSED_OUT}" > "${CLOSED_LOG}" 2>&1 &

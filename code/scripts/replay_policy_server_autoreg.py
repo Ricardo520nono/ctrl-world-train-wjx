@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import subprocess
 import sys
@@ -95,7 +96,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--policy_port", type=int, default=5694)
     parser.add_argument("--policy_mode", default="vla")
     parser.add_argument("--policy_num_ddim_steps", type=int, default=10)
-    parser.add_argument("--policy_ckpt", type=Path, default=None, help="policy checkpoint provenance for metadata")
+    parser.add_argument("--policy_ckpt", type=Path, required=True)
+    parser.add_argument("--policy_stat", type=Path, required=True)
+    parser.add_argument("--policy_stat_key", default="new_embodiment")
     parser.add_argument("--policy_bridge_python", type=Path, default=DEFAULT_STARVLA_ROOT / ".venv" / "bin" / "python")
     parser.add_argument("--starvla_root", type=Path, default=DEFAULT_STARVLA_ROOT)
     parser.add_argument("--policy_view_order", default="server", help="'server' or comma-separated view names")
@@ -128,6 +131,90 @@ def load_initial_record(cli: argparse.Namespace):
     if total_future <= 0:
         raise RuntimeError(f"record has no future frames after num_history={cli.num_history}: {data_path}")
     return rec, data_path, latent[: int(cli.num_history) + total_future], text, total_future
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_policy_action_stats(path: Path, key: str, action_dim: int) -> dict[str, np.ndarray]:
+    payload = json.loads(path.read_text())
+    if key not in payload or "action" not in payload[key]:
+        raise KeyError(f"missing {key}.action in policy stat: {path}")
+    action = payload[key]["action"]
+    required = ("min", "max", "mask")
+    missing = [name for name in required if name not in action]
+    if missing:
+        raise KeyError(f"missing policy action stat fields {missing}: {path}")
+    stats = {
+        "min": np.asarray(action["min"], dtype=np.float32),
+        "max": np.asarray(action["max"], dtype=np.float32),
+        "mask": np.asarray(action["mask"], dtype=bool),
+    }
+    for name, value in stats.items():
+        if value.shape != (action_dim,):
+            raise ValueError(f"policy stat {name} shape {value.shape} != ({action_dim},): {path}")
+    return stats
+
+
+def load_wm_action_stats(path: Path, action_dim: int) -> dict[str, np.ndarray]:
+    payload = json.loads(path.read_text())
+    stats = {
+        "p01": np.asarray(payload["state_01"], dtype=np.float32),
+        "p99": np.asarray(payload["state_99"], dtype=np.float32),
+    }
+    for name, value in stats.items():
+        if value.shape != (action_dim,):
+            raise ValueError(f"WM stat {name} shape {value.shape} != ({action_dim},): {path}")
+    return stats
+
+
+def bridge_policy_to_wm_actions(
+    policy_normalized: np.ndarray,
+    policy_stats: dict[str, np.ndarray],
+    wm_stats: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Map policy-normalized Rot6D20 actions into Ctrl-World's normalized space."""
+    policy_normalized = np.asarray(policy_normalized, dtype=np.float32)
+    if policy_normalized.ndim != 2:
+        raise ValueError(f"expected policy actions [T,D], got {policy_normalized.shape}")
+
+    policy_min = policy_stats["min"]
+    policy_max = policy_stats["max"]
+    policy_mask = policy_stats["mask"]
+    wm_p01 = wm_stats["p01"]
+    wm_p99 = wm_stats["p99"]
+    action_dim = policy_normalized.shape[-1]
+    if any(value.shape != (action_dim,) for value in (policy_min, policy_max, policy_mask, wm_p01, wm_p99)):
+        raise ValueError("policy/WM action statistics do not match the policy action dimension")
+
+    policy_clipped = np.clip(policy_normalized, -1.0, 1.0)
+    physical = np.where(
+        policy_mask,
+        0.5 * (policy_clipped + 1.0) * (policy_max - policy_min) + policy_min,
+        policy_clipped,
+    ).astype(np.float32)
+    wm_preclip = 2.0 * (physical - wm_p01) / (wm_p99 - wm_p01 + 1e-8) - 1.0
+    wm_normalized = np.clip(wm_preclip, -1.0, 1.0).astype(np.float32)
+
+    diagnostics = {
+        "policy_preclip_fraction": float(np.mean(np.abs(policy_normalized[..., policy_mask]) > 1.0)),
+        "wm_preclip_fraction": float(np.mean(np.abs(wm_preclip) > 1.0)),
+        "legacy_direct_vs_bridged_mae": float(np.mean(np.abs(policy_normalized - wm_normalized))),
+        "policy_normalized_min": float(policy_normalized.min()),
+        "policy_normalized_max": float(policy_normalized.max()),
+        "physical_min": float(physical.min()),
+        "physical_max": float(physical.max()),
+        "wm_preclip_min": float(wm_preclip.min()),
+        "wm_preclip_max": float(wm_preclip.max()),
+        "wm_normalized_min": float(wm_normalized.min()),
+        "wm_normalized_max": float(wm_normalized.max()),
+    }
+    return physical, wm_normalized, diagnostics
 
 
 def encode_image_payload(image: np.ndarray) -> dict[str, Any]:
@@ -264,18 +351,17 @@ def coerce_policy_actions(policy_actions: np.ndarray, cli: argparse.Namespace) -
 
 
 def build_wm_action_condition(
-    policy_actions: np.ndarray,
+    wm_actions: np.ndarray,
     *,
     previous_future_actions: np.ndarray | None,
     cli: argparse.Namespace,
 ) -> tuple[np.ndarray, np.ndarray]:
-    policy_actions = coerce_policy_actions(policy_actions, cli)
-    if policy_actions.shape[0] < cli.num_frames:
-        pad = np.repeat(policy_actions[-1:], cli.num_frames - policy_actions.shape[0], axis=0)
-        policy_actions = np.concatenate([policy_actions, pad], axis=0)
+    if wm_actions.shape[0] < cli.num_frames:
+        pad = np.repeat(wm_actions[-1:], cli.num_frames - wm_actions.shape[0], axis=0)
+        wm_actions = np.concatenate([wm_actions, pad], axis=0)
 
     if cli.action_chunk_size == cli.num_frames:
-        future = policy_actions[: cli.num_frames]
+        future = wm_actions[: cli.num_frames]
         return future, future
 
     if cli.action_chunk_size != cli.num_history + cli.num_frames:
@@ -285,12 +371,12 @@ def build_wm_action_condition(
         )
 
     if cli.legacy_history_action_mode == "policy_prefix":
-        if policy_actions.shape[0] < cli.action_chunk_size:
-            pad = np.repeat(policy_actions[-1:], cli.action_chunk_size - policy_actions.shape[0], axis=0)
-            policy_actions = np.concatenate([policy_actions, pad], axis=0)
-        return policy_actions[: cli.action_chunk_size], policy_actions[cli.num_history : cli.action_chunk_size]
+        if wm_actions.shape[0] < cli.action_chunk_size:
+            pad = np.repeat(wm_actions[-1:], cli.action_chunk_size - wm_actions.shape[0], axis=0)
+            wm_actions = np.concatenate([wm_actions, pad], axis=0)
+        return wm_actions[: cli.action_chunk_size], wm_actions[cli.num_history : cli.action_chunk_size]
 
-    future = policy_actions[: cli.num_frames]
+    future = wm_actions[: cli.num_frames]
     if cli.legacy_history_action_mode == "zero":
         history = np.zeros((cli.num_history, cli.action_dim), dtype=np.float32)
     elif previous_future_actions is not None and previous_future_actions.shape[0] >= cli.num_history:
@@ -301,13 +387,24 @@ def build_wm_action_condition(
 
 
 @torch.no_grad()
-def autoregressive_policy_rollout(model, args, cli, gt_latent: torch.Tensor, text: str, bridge: StarVLAPolicyBridge):
+def autoregressive_policy_rollout(
+    model,
+    args,
+    cli,
+    gt_latent: torch.Tensor,
+    text: str,
+    bridge: StarVLAPolicyBridge,
+    policy_stats: dict[str, np.ndarray],
+    wm_stats: dict[str, np.ndarray],
+):
     device = next(model.unet.parameters()).device
     dtype = torch.bfloat16
     current = gt_latent[: cli.num_history][None].to(device=device, dtype=dtype)
     pred_chunks = []
-    policy_action_chunks = []
+    policy_action_chunks_norm = []
+    policy_action_chunks_physical = []
     wm_action_chunks = []
+    action_bridge_diagnostics = []
     previous_future_actions = None
     total_future = int(cli._total_future)
     view_order = view_order_from_metadata(bridge.metadata, cli)
@@ -315,15 +412,21 @@ def autoregressive_policy_rollout(model, args, cli, gt_latent: torch.Tensor, tex
     for chunk_id, start in enumerate(range(0, total_future, cli.num_frames)):
         valid = min(cli.num_frames, total_future - start)
         images = decode_current_policy_images(model, current, cli.decode_chunk, view_order)
-        policy_actions = bridge.predict(
+        policy_actions_norm = bridge.predict(
             request_id=f"ctrlworld-{chunk_id:04d}",
             lang=text,
             images=images,
             cli=cli,
             seed=cli.seed + chunk_id,
         )
+        policy_actions_norm = coerce_policy_actions(policy_actions_norm, cli)
+        policy_actions_physical, wm_actions_norm, bridge_diagnostics = bridge_policy_to_wm_actions(
+            policy_actions_norm,
+            policy_stats,
+            wm_stats,
+        )
         wm_action, previous_future_actions = build_wm_action_condition(
-            policy_actions,
+            wm_actions_norm,
             previous_future_actions=previous_future_actions,
             cli=cli,
         )
@@ -353,17 +456,27 @@ def autoregressive_policy_rollout(model, args, cli, gt_latent: torch.Tensor, tex
 
         keep = future[:, :valid].to(dtype)
         pred_chunks.append(keep.cpu())
-        policy_action_chunks.append(policy_actions)
+        policy_action_chunks_norm.append(policy_actions_norm)
+        policy_action_chunks_physical.append(policy_actions_physical)
         wm_action_chunks.append(wm_action)
+        action_bridge_diagnostics.append(bridge_diagnostics)
         current = torch.cat([current, keep], dim=1)[:, -cli.num_history :].to(device=device, dtype=dtype)
         print(
             f"[policy_autoreg] chunk={chunk_id} action_range=[{start},{start + valid}) "
-            f"policy_actions={tuple(policy_actions.shape)} wm_action={tuple(wm_action.shape)}",
+            f"policy_actions={tuple(policy_actions_norm.shape)} wm_action={tuple(wm_action.shape)} "
+            f"bridge_mae={bridge_diagnostics['legacy_direct_vs_bridged_mae']:.4f}",
             flush=True,
         )
 
     pred_latent = torch.cat([gt_latent[: cli.num_history][None].cpu(), torch.cat(pred_chunks, dim=1)], dim=1)
-    return pred_latent, policy_action_chunks, wm_action_chunks, view_order
+    return (
+        pred_latent,
+        policy_action_chunks_norm,
+        policy_action_chunks_physical,
+        wm_action_chunks,
+        action_bridge_diagnostics,
+        view_order,
+    )
 
 
 def main() -> None:
@@ -374,6 +487,8 @@ def main() -> None:
     out = cli.out or DEFAULT_WM_RUN_DIR / "rollout_policy_server_rotate_qrcode" / "checkpoint-step25000-epoch2.06_sample0_steps20"
     out.mkdir(parents=True, exist_ok=True)
     args = make_args(cli, out)
+    policy_stats = load_policy_action_stats(cli.policy_stat, cli.policy_stat_key, cli.action_dim)
+    wm_stats = load_wm_action_stats(cli.stat, cli.action_dim)
 
     rec, data_path, gt_latent, text, total_future = load_initial_record(cli)
     cli._total_future = total_future
@@ -382,8 +497,15 @@ def main() -> None:
     bridge = StarVLAPolicyBridge(cli)
     try:
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            pred_latent, policy_action_chunks, wm_action_chunks, view_order = autoregressive_policy_rollout(
-                model, args, cli, gt_latent, text, bridge
+            (
+                pred_latent,
+                policy_action_chunks_norm,
+                policy_action_chunks_physical,
+                wm_action_chunks,
+                action_bridge_diagnostics,
+                view_order,
+            ) = autoregressive_policy_rollout(
+                model, args, cli, gt_latent, text, bridge, policy_stats, wm_stats
             )
     finally:
         bridge.close()
@@ -397,12 +519,18 @@ def main() -> None:
             "gt_latents": gt_latent,
             "text": text,
             "record": rec,
-            "policy_action_chunks_norm": policy_action_chunks,
+            "policy_action_chunks_norm": policy_action_chunks_norm,
+            "policy_action_chunks_physical": policy_action_chunks_physical,
             "wm_action_chunks_norm": wm_action_chunks,
+            "action_bridge_diagnostics": action_bridge_diagnostics,
         },
         out / "policy_server_autoreg_latents.pt",
     )
-    np.save(out / "policy_action_chunks_norm.npy", np.asarray(policy_action_chunks, dtype=np.float32))
+    np.save(out / "policy_action_chunks_norm.npy", np.asarray(policy_action_chunks_norm, dtype=np.float32))
+    np.save(
+        out / "policy_action_chunks_physical.npy",
+        np.asarray(policy_action_chunks_physical, dtype=np.float32),
+    )
     np.save(out / "wm_action_chunks_norm.npy", np.asarray(wm_action_chunks, dtype=np.float32))
 
     pred_views = decode_three_views(model.pipeline, pred_latent.to(device="cuda", dtype=torch.bfloat16), cli.decode_chunk)
@@ -438,7 +566,17 @@ def main() -> None:
         "policy_port": int(cli.policy_port),
         "policy_mode": cli.policy_mode,
         "policy_num_ddim_steps": int(cli.policy_num_ddim_steps),
-        "policy_ckpt": str(cli.policy_ckpt) if cli.policy_ckpt else None,
+        "policy_ckpt": str(cli.policy_ckpt),
+        "action_normalization_bridge": {
+            "schema": "policy_normalized_to_physical_rot6d20_to_ctrlworld_p01p99_normalized",
+            "policy_stat": str(cli.policy_stat),
+            "policy_stat_key": cli.policy_stat_key,
+            "policy_stat_sha256": sha256_file(cli.policy_stat),
+            "wm_stat": str(cli.stat),
+            "wm_stat_sha256": sha256_file(cli.stat),
+            "policy_mask": policy_stats["mask"].tolist(),
+            "per_chunk_diagnostics": action_bridge_diagnostics,
+        },
         "policy_bridge_python": str(cli.policy_bridge_python),
         "starvla_root": str(cli.starvla_root),
         "policy_server_metadata": bridge.metadata,

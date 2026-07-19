@@ -32,6 +32,8 @@ Policy closed-loop 固定使用：
 1. `open_loop_expert_actions`：动作来自记录的专家轨迹，但每段生成的最后一帧会递归作为下一段输入。
 2. `closed_loop_qwenoft_step90000`：QwenOFT 每轮根据当前 WM 图像预测 32 步动作，Ctrl-World 生成 32 帧，末帧再反馈给 policy。
 
+闭环 action 必须经过两段显式映射：QwenOFT `dataset_statistics.json` 的 normalized action 先反归一化到 physical Rot6D20，再使用当前 Ctrl-World 单任务 Mix4 `stat.json` 的 p01/p99 归一化。禁止把 policy 的 `normalized_actions` 直接作为 Ctrl-World action condition。
+
 第二项是 learned policy/world-model compatibility rollout，不是 RoboTwin 物理仿真成功率，不能作为任务成功率报告。
 
 ## 运行
@@ -96,4 +98,21 @@ AIHC `train22` job `job-ums20lzohe3z` 已成功完成两个任务的四条 rollo
 
 最终审计：8 个主要 MP4 均可解码；place 为241帧，dump 为340帧；生成视频 `320x720`，GT/生成对比视频 `640x720`；policy 与 WM action arrays 分别为 `(8,32,20)` 和 `(11,32,20)`，全部 finite；checkpoint/stat/policy/sample provenance 均写入 metadata。四个结果目录各包含 `review_contact_sheet.png`，肉眼检查 RGB 通道正确，没有 R/B 反转。
 
-这些结果显示 step12500 模型可完成长时递归生成，但随着 horizon 增长存在明显视觉漂移，closed-loop 更强。它们适合作为接口和定性 sanity check，不应作为最终40k模型质量或 simulator task success 的结论。
+注意：上述 `retry1` closed-loop 结果在审计后确认存在 action normalization bridge 缺失，policy normalized action 被直接送入 Ctrl-World；它们只作为 bug 证据保留，不得用于评价闭环质量。open-loop expert-action 结果不受该 bug 影响。
+
+## Action bridge 修复版
+
+2026-07-19 已按 `policy normalized -> physical Rot6D20 -> Ctrl-World p01/p99 normalized` 修复闭环 evaluator，并使用相同 step12500 checkpoint、trajectory、text、seed 和 20-step denoising 在本机 A800 上重跑完整闭环：
+
+```text
+/mnt/dataset/public_data/cscsx_projects/AF3/ctrl-world/outputs/ACWM_ctrlworld_mix4_place_burger_fries_c32_cur1f32_rot6d20_cfstatemajor_8gpu_20260718/handoff_eval/step12500_sample0_steps20_statbridgefix_local_20260719/closed_loop_qwenoft_step90000
+
+/mnt/dataset/public_data/cscsx_projects/AF3/ctrl-world/outputs/ACWM_ctrlworld_mix4_dump_bin_bigbin_c32_cur1f32_rot6d20_cfstatemajor_8gpu_20260718/handoff_eval/step12500_sample0_steps20_statbridgefix_local_20260719/closed_loop_qwenoft_step90000
+```
+
+| Task | 旧错误 closed MSE | 修复后 closed MSE |
+|---|---:|---:|
+| `place_burger_fries` | 0.716690 | 0.205424 |
+| `dump_bin_bigbin` | 0.426697 | 0.219192 |
+
+修复版 metadata 写明 policy/WM 两套 stat 的绝对路径与 SHA256，并保留 policy normalized、physical 和 WM normalized 三套 action arrays。三视角输入顺序固定为 `cam_high, cam_left_wrist, cam_right_wrist`。Ctrl-World 与 policy clean 训练数据使用的 text 均与 RoboTwin `full_description` 完全一致。
