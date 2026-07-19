@@ -17,7 +17,7 @@ import hashlib
 import io
 import json
 import os
-import pickle
+import subprocess
 import sys
 from collections import defaultdict
 
@@ -182,6 +182,76 @@ def load_enhanced_sample(sample_dir, vae, device, batch_size, Image):
     return latent, action_pos[:T], ee_target[:T]
 
 
+_VIDEO_FRAME_COUNT_CACHE = {}
+
+
+def video_frame_count(video_path, VideoReader=None, cpu=None, iio=None):
+    video_path = os.path.abspath(video_path)
+    if video_path in _VIDEO_FRAME_COUNT_CACHE:
+        return _VIDEO_FRAME_COUNT_CACHE[video_path]
+    if VideoReader is not None:
+        try:
+            count = len(VideoReader(video_path, ctx=cpu(0)))
+            _VIDEO_FRAME_COUNT_CACHE[video_path] = int(count)
+            return int(count)
+        except Exception:
+            pass
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=nb_read_frames,nb_frames",
+                "-of",
+                "default=nw=1:nk=1",
+                video_path,
+            ],
+            text=True,
+            timeout=60,
+        )
+        for line in out.splitlines():
+            line = line.strip()
+            if line and line != "N/A":
+                count = int(float(line))
+                _VIDEO_FRAME_COUNT_CACHE[video_path] = count
+                return count
+    except Exception:
+        pass
+    if iio is not None:
+        try:
+            count = sum(1 for _ in iio.imiter(video_path))
+            _VIDEO_FRAME_COUNT_CACHE[video_path] = int(count)
+            return int(count)
+        except Exception:
+            pass
+    raise RuntimeError(f"unable to determine frame count for {video_path}")
+
+
+def discover_lerobot_video_chunks(video_dir, VideoReader=None, cpu=None, iio=None):
+    if not os.path.isdir(video_dir):
+        raise FileNotFoundError(f"missing LeRobot video directory: {video_dir}")
+    video_paths = []
+    for root, _, files in os.walk(video_dir):
+        for name in files:
+            if name.endswith(".mp4"):
+                video_paths.append(os.path.join(root, name))
+    video_paths = sorted(video_paths)
+    if not video_paths:
+        raise FileNotFoundError(f"no mp4 files under LeRobot video directory: {video_dir}")
+    chunks = []
+    offset = 0
+    for path in video_paths:
+        count = video_frame_count(path, VideoReader, cpu, iio)
+        chunks.append((path, offset, offset + count))
+        offset += count
+    return chunks
+
+
 def read_video_frames(video_path, frame_indices, Image, VideoReader=None, cpu=None, iio=None):
     if VideoReader is not None:
         try:
@@ -192,30 +262,68 @@ def read_video_frames(video_path, frame_indices, Image, VideoReader=None, cpu=No
                 raise
             print(f"[WARN] decord failed for {video_path}; falling back to imageio: {exc}", flush=True)
     if iio is not None:
+        requested = [int(idx) for idx in frame_indices]
         frames = []
-        for idx in frame_indices:
+        failed_random_access = False
+        for idx in requested:
             try:
                 frame = iio.imread(video_path, index=int(idx))
             except Exception as exc:
                 print(
                     f"[WARN] imageio random access failed for {video_path} frame={int(idx)}; "
-                    f"falling back to sequential decode: {exc}",
+                    f"falling back to one-pass sequential decode: {exc}",
                     flush=True,
                 )
-                wanted = set(int(v) for v in frame_indices)
-                target = int(idx)
-                frame = None
-                for seq_idx, seq_frame in enumerate(iio.imiter(video_path)):
-                    if seq_idx == target:
-                        frame = seq_frame
-                        break
-                    if seq_idx > max(wanted):
-                        break
-                if frame is None:
-                    raise RuntimeError(f"unable to decode frame {target} from {video_path}")
+                failed_random_access = True
+                break
             frames.append(Image.fromarray(frame).convert("RGB"))
+        if failed_random_access:
+            wanted = set(requested)
+            found = {}
+            max_wanted = max(wanted) if wanted else -1
+            for seq_idx, seq_frame in enumerate(iio.imiter(video_path)):
+                if seq_idx in wanted:
+                    found[seq_idx] = Image.fromarray(seq_frame).convert("RGB")
+                    if len(found) == len(wanted):
+                        break
+                if seq_idx > max_wanted:
+                    break
+            missing = [idx for idx in requested if idx not in found]
+            if missing:
+                raise RuntimeError(f"unable to decode frame {missing[0]} from {video_path}")
+            frames = [found[idx] for idx in requested]
         return frames
     raise RuntimeError("Either decord or imageio is required to read LeRobot videos.")
+
+
+def read_lerobot_video_frames(video_dir, frame_indices, Image, VideoReader=None, cpu=None, iio=None):
+    chunks = discover_lerobot_video_chunks(video_dir, VideoReader, cpu, iio)
+    total_frames = chunks[-1][2]
+    requested = [int(idx) for idx in frame_indices]
+    if requested and (min(requested) < 0 or max(requested) >= total_frames):
+        raise RuntimeError(
+            f"requested frame range [{min(requested)}, {max(requested)}] exceeds "
+            f"{total_frames} frames under {video_dir}"
+        )
+    grouped = defaultdict(list)
+    positions = defaultdict(list)
+    for pos, idx in enumerate(requested):
+        for path, start, end in chunks:
+            if start <= idx < end:
+                grouped[path].append(idx - start)
+                positions[path].append(pos)
+                break
+        else:
+            raise RuntimeError(f"unable to map global frame {idx} under {video_dir}")
+    frames = [None] * len(requested)
+    for path, local_indices in grouped.items():
+        local_frames = read_video_frames(path, local_indices, Image, VideoReader, cpu, iio)
+        for pos, frame in zip(positions[path], local_frames):
+            frames[pos] = frame
+    missing = [i for i, frame in enumerate(frames) if frame is None]
+    if missing:
+        raise RuntimeError(f"failed to read {len(missing)} frames under {video_dir}; first missing position={missing[0]}")
+    return frames
 
 
 def load_lerobot_episode(task_root, video_task_root, episode_idx, vae, device, batch_size, Image, pd, VideoReader, cpu, iio):
@@ -230,10 +338,16 @@ def load_lerobot_episode(task_root, video_task_root, episode_idx, vae, device, b
     action_pos = action_all[:-1]
 
     cam_latents = {}
-    frame_indices = ep_df["frame_index"].astype(int).to_numpy()
+    # LeRobot videos may be split across multiple mp4 chunk files. `frame_index`
+    # resets inside each episode, while `index` is the global frame position in
+    # the concatenated task video stream. Using `frame_index` here repeats the
+    # beginning of file-000.mp4 for every episode; using `index` without chunk
+    # mapping fails once a camera has file-001.mp4.
+    video_frame_col = "index" if "index" in ep_df.columns else "frame_index"
+    video_frame_indices = ep_df[video_frame_col].astype(int).to_numpy()
     for video_key, cam_key in zip(LEROBOT_VIDEO_KEYS, CAMERA_KEYS):
-        video_path = os.path.join(video_task_root, "videos", video_key, "chunk-000", "file-000.mp4")
-        frames = read_video_frames(video_path, frame_indices, Image, VideoReader, cpu, iio)
+        video_dir = os.path.join(video_task_root, "videos", video_key)
+        frames = read_lerobot_video_frames(video_dir, video_frame_indices, Image, VideoReader, cpu, iio)
         cam_latents[cam_key] = encode_frames(vae, frames, device, batch_size, Image)
 
     latent = stack_camera_latents(cam_latents)
@@ -346,8 +460,9 @@ def read_jsonl(path):
 
 def process_enhanced(records, enhanced_split_root, out_root, manifest_name, vae, device, batch_size, Image, overwrite, task_instruction_root):
     manifest_path = os.path.join(out_root, "manifests", manifest_name)
-    if os.path.exists(manifest_path):
-        os.remove(manifest_path)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    with open(manifest_path, "w"):
+        pass
     processed = 0
     skipped = 0
     for i, rec in enumerate(records, 1):
@@ -498,6 +613,8 @@ def main():
     parser.add_argument("--svd_path", required=True)
     parser.add_argument("--out_root", required=True)
     parser.add_argument("--enhanced_split_root", default="/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingData/enhanced_v1_split")
+    parser.add_argument("--enhanced_train_manifest_path", default=None)
+    parser.add_argument("--enhanced_test_quick_manifest_path", default=None)
     parser.add_argument("--clean_lerobot_root", default="/mnt/dataset/csx_workspace/Ideas/data/ActionFollowingBench/data_lerobot/robotwin_delta_ee/demo_clean_zed2i_visible")
     parser.add_argument("--clean_lerobot_video_root", default=None)
     parser.add_argument("--tasks", nargs="+", required=True)
@@ -551,7 +668,11 @@ def main():
         )
 
     if include_enhanced and args.split in {"train", "both"}:
-        train_manifest = os.path.join(args.enhanced_split_root, "manifests", "train_samples.jsonl")
+        train_manifest = args.enhanced_train_manifest_path or os.path.join(
+            args.enhanced_split_root, "manifests", "train_samples.jsonl"
+        )
+        if not os.path.isfile(train_manifest):
+            raise FileNotFoundError(f"enhanced train manifest does not exist: {train_manifest}")
         records = load_manifest_records(train_manifest, set(args.tasks), args.limit_per_family_task)
         records = shard_records(
             records,
@@ -566,7 +687,11 @@ def main():
         )
 
     if include_enhanced and args.split in {"test_quick", "both"}:
-        quick_manifest = os.path.join(args.enhanced_split_root, "manifests", "test_quick_chunks.jsonl")
+        quick_manifest = args.enhanced_test_quick_manifest_path or os.path.join(
+            args.enhanced_split_root, "manifests", "test_quick_chunks.jsonl"
+        )
+        if not os.path.isfile(quick_manifest):
+            raise FileNotFoundError(f"enhanced test_quick manifest does not exist: {quick_manifest}")
         records = load_manifest_records(quick_manifest, set(args.tasks), args.limit_per_family_task)
         records = shard_records(
             records,
@@ -594,7 +719,8 @@ def main():
                     for line in src:
                         out.write(line)
 
-    with open(os.path.join(args.out_root, "precompute_summary.json"), "w") as f:
+    summary_name = manifest_with_suffix("precompute_summary.json", args.manifest_suffix)
+    with open(os.path.join(args.out_root, summary_name), "w") as f:
         json.dump(summary, f, indent=2, sort_keys=True)
     print(json.dumps(summary, indent=2, sort_keys=True))
 
