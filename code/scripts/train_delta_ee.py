@@ -449,6 +449,7 @@ if __name__ == "__main__":
     parser.add_argument('--action_following_chunk_size', type=int, default=None)
     parser.add_argument('--action_following_dataset_length', type=int, default=None)
     parser.add_argument('--action_following_sampling_seed', type=int, default=None)
+    parser.add_argument('--action_following_task_balanced', action='store_true')
     args_new = parser.parse_args()
     args = wm_args()
 

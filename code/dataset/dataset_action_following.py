@@ -167,6 +167,7 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         self.T = self.num_history + self.num_frames
         self.action_dim = int(getattr(args, "action_dim", 14))
         self.seed = int(getattr(args, "action_following_sampling_seed", 20260630))
+        self.task_balanced = bool(getattr(args, "action_following_task_balanced", False))
         self.use_ee_head = bool(getattr(args, "use_ee_head", False))
         self.protocol = getattr(args, "action_following_sampling_protocol", "mix_4to1to1to1to1")
         self.latent_root = getattr(args, "action_following_latent_root", None)
@@ -208,6 +209,8 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         if self.eval_mode:
             self.family_names = sorted(self.by_family.keys())
             self.family_p = np.ones(len(self.family_names), dtype=np.float64) / max(1, len(self.family_names))
+            self.task_names = sorted({rec.get("task", "unknown") for rec in self.records})
+            self.task_p = np.ones(len(self.task_names), dtype=np.float64) / max(1, len(self.task_names))
             self.sample_weights = None
             self.train_records = []
             self.train_cum_weights = np.array([], dtype=np.float64)
@@ -262,6 +265,7 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         base_record_weights = []
         effective_windows = defaultdict(int)
         base_weighted_mass = defaultdict(float)
+        base_weighted_mass_by_task_family = defaultdict(float)
         for rec in self.records:
             family = rec["_family"]
             if family not in sample_weights:
@@ -274,13 +278,32 @@ class ActionFollowingCtrlWorldDataset(Dataset):
             base_record_weights.append(mass)
             effective_windows[family] += nwin
             base_weighted_mass[family] += mass
+            base_weighted_mass_by_task_family[(rec.get("task", "unknown"), family)] += mass
 
         if not train_records:
             raise RuntimeError(f"No train records available for protocol {self.protocol}.")
 
         target_probs = PROTOCOL_TARGET_PROBS.get(self.protocol)
         family_scale = {}
-        if target_probs:
+        task_family_scale = {}
+        tasks = sorted({rec.get("task", "unknown") for rec in train_records})
+        if target_probs and self.task_balanced:
+            target_total = sum(float(target_probs.get(family, 0.0)) for family in sample_weights)
+            if target_total <= 0:
+                raise RuntimeError(f"Non-positive target probability mass for protocol {self.protocol}.")
+            for task in tasks:
+                missing = [
+                    family for family in sample_weights
+                    if base_weighted_mass_by_task_family.get((task, family), 0.0) <= 0
+                ]
+                if missing:
+                    raise RuntimeError(f"Task {task} is missing families required by {self.protocol}: {missing}")
+                for family in sample_weights:
+                    base_mass = float(base_weighted_mass_by_task_family[(task, family)])
+                    target_mass = float(target_probs[family]) / target_total / float(len(tasks))
+                    task_family_scale[(task, family)] = target_mass / base_mass
+            family_scale = {family: None for family in sample_weights}
+        elif target_probs:
             target_total = sum(float(target_probs.get(family, 0.0)) for family in sample_weights)
             if target_total <= 0:
                 raise RuntimeError(f"Non-positive target probability mass for protocol {self.protocol}.")
@@ -292,16 +315,28 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         else:
             family_scale = {family: 1.0 for family in sample_weights}
 
-        record_weights = [
-            mass * family_scale[rec["_family"]]
-            for rec, mass in zip(train_records, base_record_weights)
-        ]
-        final_per_chunk_weights = {
-            family: float(sample_weights[family]) * float(family_scale[family])
-            for family in sample_weights
-        }
-        ref_family = "perturbed" if "perturbed" in final_per_chunk_weights else next(iter(final_per_chunk_weights))
-        ref_weight = final_per_chunk_weights[ref_family]
+        if self.task_balanced:
+            record_weights = [
+                mass * task_family_scale[(rec.get("task", "unknown"), rec["_family"])]
+                for rec, mass in zip(train_records, base_record_weights)
+            ]
+            final_per_chunk_weights = {
+                f"{task}/{family}": float(sample_weights[family]) * float(task_family_scale[(task, family)])
+                for task in tasks
+                for family in sample_weights
+            }
+            ref_key = f"{tasks[0]}/perturbed" if "perturbed" in sample_weights else next(iter(final_per_chunk_weights))
+        else:
+            record_weights = [
+                mass * family_scale[rec["_family"]]
+                for rec, mass in zip(train_records, base_record_weights)
+            ]
+            final_per_chunk_weights = {
+                family: float(sample_weights[family]) * float(family_scale[family])
+                for family in sample_weights
+            }
+            ref_key = "perturbed" if "perturbed" in final_per_chunk_weights else next(iter(final_per_chunk_weights))
+        ref_weight = final_per_chunk_weights[ref_key]
         if ref_weight > 0:
             final_per_chunk_weights_normalized = {
                 family: weight / ref_weight
@@ -310,8 +345,13 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         else:
             final_per_chunk_weights_normalized = dict(final_per_chunk_weights)
         weighted_mass = defaultdict(float)
+        weighted_mass_by_task = defaultdict(float)
+        weighted_mass_by_task_family = defaultdict(float)
         for rec, mass in zip(train_records, record_weights):
             weighted_mass[rec["_family"]] += float(mass)
+            task = rec.get("task", "unknown")
+            weighted_mass_by_task[task] += float(mass)
+            weighted_mass_by_task_family[(task, rec["_family"])] += float(mass)
 
         cum_weights = np.cumsum(np.asarray(record_weights, dtype=np.float64))
         total = float(cum_weights[-1])
@@ -327,12 +367,26 @@ class ActionFollowingCtrlWorldDataset(Dataset):
             [weighted_mass.get(name, 0.0) / total for name in self.family_names],
             dtype=np.float64,
         )
+        self.task_names = tasks
+        self.task_p = np.array(
+            [weighted_mass_by_task.get(name, 0.0) / total for name in self.task_names],
+            dtype=np.float64,
+        )
         self.effective_windows_by_family = dict(effective_windows)
         self.base_weighted_mass_by_family = dict(base_weighted_mass)
         self.family_normalization_by_family = dict(family_scale)
+        self.task_family_normalization = {
+            f"{task}/{family}": scale
+            for (task, family), scale in task_family_scale.items()
+        }
         self.final_per_chunk_sample_weights = dict(final_per_chunk_weights)
         self.final_per_chunk_sample_weights_normalized = dict(final_per_chunk_weights_normalized)
         self.weighted_mass_by_family = dict(weighted_mass)
+        self.weighted_mass_by_task = dict(weighted_mass_by_task)
+        self.weighted_mass_by_task_family = {
+            f"{task}/{family}": mass
+            for (task, family), mass in weighted_mass_by_task_family.items()
+        }
 
     def _default_train_length(self):
         if self.eval_mode:
@@ -347,15 +401,19 @@ class ActionFollowingCtrlWorldDataset(Dataset):
             windows[rec["_family"]] += rec["_nwin"]
         print("[ActionFollowingCtrlWorldDataset]")
         print(
-            f"  mode={self.mode}, protocol={self.protocol}, "
+            f"  mode={self.mode}, protocol={self.protocol}, task_balanced={self.task_balanced}, "
             f"latent_T={self.T}, action_T={self.action_T}, virtual_length={self.virtual_length}"
         )
         print(f"  manifest={manifest_path}")
         print(f"  sampler_family_prob={dict(zip(self.family_names, self.family_p.tolist()))}")
         if not self.eval_mode:
+            print(f"  sampler_task_prob={dict(zip(self.task_names, self.task_p.tolist()))}")
+        if not self.eval_mode:
             print(f"  per_chunk_sample_weights={self.sample_weights}")
             print(f"  final_per_chunk_sample_weights_normalized={self.final_per_chunk_sample_weights_normalized}")
             print(f"  manifest_family_normalization={self.family_normalization_by_family}")
+            if self.task_balanced:
+                print(f"  manifest_task_family_normalization={self.task_family_normalization}")
         for family in sorted(counts):
             print(f"  {family}: records={counts[family]}, effective_windows={windows[family]}")
 
@@ -391,15 +449,49 @@ class ActionFollowingCtrlWorldDataset(Dataset):
         seed = int(seed)
         tolerance = float(tolerance)
         counts = defaultdict(int)
+        task_counts = defaultdict(int)
+        task_family_counts = defaultdict(int)
         for i in range(num_samples):
             rng = np.random.default_rng(seed + i)
             rec, _ = self._choose_train_record_from_rng(rng)
             counts[rec["_family"]] += 1
+            task = rec.get("task", "unknown")
+            task_counts[task] += 1
+            task_family_counts[(task, rec["_family"])] += 1
 
         observed = {family: counts.get(family, 0) / float(num_samples) for family in self.family_names}
         target = PROTOCOL_TARGET_PROBS.get(self.protocol, {})
         deltas = {family: observed.get(family, 0.0) - target.get(family, 0.0) for family in self.family_names}
         passed = all(abs(deltas.get(family, 0.0)) <= tolerance for family in target)
+        observed_task = {
+            task: task_counts.get(task, 0) / float(num_samples)
+            for task in self.task_names
+        }
+        target_task = {
+            task: 1.0 / float(len(self.task_names))
+            for task in self.task_names
+        } if self.task_balanced else dict(zip(self.task_names, self.task_p.tolist()))
+        task_delta = {
+            task: observed_task.get(task, 0.0) - target_task.get(task, 0.0)
+            for task in self.task_names
+        }
+        observed_task_family = {
+            f"{task}/{family}": task_family_counts.get((task, family), 0) / float(num_samples)
+            for task in self.task_names
+            for family in self.family_names
+        }
+        target_task_family = {
+            f"{task}/{family}": target_task[task] * target.get(family, 0.0)
+            for task in self.task_names
+            for family in self.family_names
+        } if self.task_balanced else {}
+        task_family_delta = {
+            key: observed_task_family.get(key, 0.0) - value
+            for key, value in target_task_family.items()
+        }
+        if self.task_balanced:
+            passed = passed and all(abs(value) <= tolerance for value in task_delta.values())
+            passed = passed and all(abs(value) <= tolerance for value in task_family_delta.values())
         report = {
             "protocol": self.protocol,
             "seed": seed,
@@ -411,11 +503,25 @@ class ActionFollowingCtrlWorldDataset(Dataset):
             "effective_windows_by_family": self.effective_windows_by_family,
             "base_weighted_mass_by_family": self.base_weighted_mass_by_family,
             "manifest_family_normalization": self.family_normalization_by_family,
+            "task_balanced": self.task_balanced,
+            "manifest_task_family_normalization": self.task_family_normalization,
             "final_weighted_mass_by_family": self.weighted_mass_by_family,
             "sampler_family_prob_from_mass": dict(zip(self.family_names, self.family_p.tolist())),
+            "sampler_task_prob_from_mass": dict(zip(self.task_names, self.task_p.tolist())),
             "target_family_prob": target,
             "observed_family_prob": observed,
             "counts": dict(counts),
+            "target_task_prob": target_task,
+            "observed_task_prob": observed_task,
+            "task_counts": dict(task_counts),
+            "task_delta": task_delta,
+            "target_task_family_prob": target_task_family,
+            "observed_task_family_prob": observed_task_family,
+            "task_family_counts": {
+                f"{task}/{family}": count
+                for (task, family), count in task_family_counts.items()
+            },
+            "task_family_delta": task_family_delta,
             "delta": deltas,
             "passed": passed,
         }

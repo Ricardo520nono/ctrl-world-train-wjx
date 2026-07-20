@@ -39,6 +39,8 @@ def parse_args():
         subparser.add_argument("--old_cache_root", required=True)
         subparser.add_argument("--enhanced_split_root", required=True)
         subparser.add_argument("--out_root", required=True)
+        subparser.add_argument("--delta_origin", default="state_major_incremental")
+        subparser.add_argument("--other_delta_origin")
         if name == "finalize":
             subparser.add_argument("--num_shards", type=int, default=8)
     return parser.parse_args()
@@ -221,6 +223,8 @@ def plan(args):
         "old_cache_root": str(old_root),
         "enhanced_split_root": str(enhanced_root),
         "out_root": str(out_root),
+        "delta_origin": args.delta_origin,
+        "other_delta_origin": args.other_delta_origin or args.delta_origin,
         "old_clean_records": len(old_clean),
         "current_train_records": len(current_train),
         "current_test_quick_records": len(current_quick),
@@ -306,7 +310,10 @@ def finalize(args):
             if key not in delta_train_map:
                 raise RuntimeError(f"missing delta train row: {key}")
             cache_row = delta_train_map[key]
-            origin = "state_major_incremental"
+            if canonical_family(source_row) == "counterfactual_replay":
+                origin = args.delta_origin
+            else:
+                origin = args.other_delta_origin or args.delta_origin
         final_train.append(attach_provenance(cache_row, source_row, origin))
         train_origins[origin] += 1
 
@@ -321,7 +328,10 @@ def finalize(args):
             if key not in delta_quick_map:
                 raise RuntimeError(f"missing delta test_quick row: {key}")
             cache_row = delta_quick_map[key]
-            origin = "state_major_incremental"
+            if canonical_family(source_row) == "counterfactual_replay":
+                origin = args.delta_origin
+            else:
+                origin = args.other_delta_origin or args.delta_origin
         final_quick.append(attach_provenance(cache_row, source_row, origin))
         quick_origins[origin] += 1
 
@@ -348,6 +358,8 @@ def finalize(args):
         "task": args.task,
         "old_cache_root": str(old_root),
         "out_root": str(out_root),
+        "delta_origin": args.delta_origin,
+        "other_delta_origin": args.other_delta_origin or args.delta_origin,
         "clean_train_records": len(final_clean),
         "enhanced_train_records": len(final_train),
         "train_records": len(all_train),

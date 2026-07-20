@@ -69,6 +69,7 @@ SAMPLER_AUDIT_SAMPLES="${SAMPLER_AUDIT_SAMPLES:-10000}"
 SAMPLER_AUDIT_SEED="${SAMPLER_AUDIT_SEED:-20260630}"
 SAMPLER_AUDIT_TOLERANCE="${SAMPLER_AUDIT_TOLERANCE:-0.02}"
 REQUIRE_WANDB_ONLINE="${REQUIRE_WANDB_ONLINE:-0}"
+ACTION_FOLLOWING_TASK_BALANCED="${ACTION_FOLLOWING_TASK_BALANCED:-0}"
 
 if [[ "${REQUIRE_WANDB_ONLINE}" == "1" ]]; then
   if [[ "${WANDB_MODE:-online}" != "online" ]]; then
@@ -235,6 +236,10 @@ else
 fi
 
 echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
+TASK_BALANCE_FLAGS=()
+if [[ "${ACTION_FOLLOWING_TASK_BALANCED}" == "1" ]]; then
+  TASK_BALANCE_FLAGS+=(--task_balanced)
+fi
 "${PYTHON_BIN}" "${PROJECT_ROOT}/scripts/audit_action_following_sampler.py" \
   --latent_root "${LATENT_ROOT}" \
   --train_manifest "${LATENT_ROOT}/manifests/train.jsonl" \
@@ -247,7 +252,8 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   --action_dim "${ACTION_DIM}" \
   --num_samples "${SAMPLER_AUDIT_SAMPLES}" \
   --seed "${SAMPLER_AUDIT_SEED}" \
-  --tolerance "${SAMPLER_AUDIT_TOLERANCE}"
+  --tolerance "${SAMPLER_AUDIT_TOLERANCE}" \
+  "${TASK_BALANCE_FLAGS[@]}"
 
 {
   echo "RUN_NAME=${RUN_NAME}"
@@ -271,6 +277,7 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
   echo "SAMPLER_AUDIT_SAMPLES=${SAMPLER_AUDIT_SAMPLES}"
   echo "SAMPLER_AUDIT_SEED=${SAMPLER_AUDIT_SEED}"
   echo "SAMPLER_AUDIT_TOLERANCE=${SAMPLER_AUDIT_TOLERANCE}"
+  echo "ACTION_FOLLOWING_TASK_BALANCED=${ACTION_FOLLOWING_TASK_BALANCED}"
   echo "WANDB_MODE=${WANDB_MODE:-online}"
   echo "WANDB_PROJECT=ctrlworld_action_following"
   echo "WANDB_RUN_NAME=${RUN_NAME}"
@@ -278,6 +285,10 @@ echo "[INFO] Auditing ActionFollowing sampler protocol=${PROTOCOL}"
 } > "${OUTPUT_DIR}/launch_cmd.txt"
 
 echo "[INFO] Launching ${RUN_NAME}"
+TRAIN_TASK_BALANCE_FLAGS=()
+if [[ "${ACTION_FOLLOWING_TASK_BALANCED}" == "1" ]]; then
+  TRAIN_TASK_BALANCE_FLAGS+=(--action_following_task_balanced)
+fi
 "${PYTHON_BIN}" -m torch.distributed.run \
   --nproc_per_node="${NPROC_PER_NODE}" \
   --master_port="${MASTER_PORT}" \
@@ -297,6 +308,7 @@ echo "[INFO] Launching ${RUN_NAME}"
   --action_following_sampling_protocol "${PROTOCOL}" \
   --action_following_chunk_size "${CHUNK_SIZE}" \
   --action_following_sampling_seed "${SAMPLER_AUDIT_SEED}" \
+  "${TRAIN_TASK_BALANCE_FLAGS[@]}" \
   --output_dir "${OUTPUT_DIR}" \
   --wandb_project_name ctrlworld_action_following \
   --wandb_run_name "${RUN_NAME}" \

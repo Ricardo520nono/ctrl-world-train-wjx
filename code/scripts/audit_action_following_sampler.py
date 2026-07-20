@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument("--num_samples", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=20260630)
     parser.add_argument("--tolerance", type=float, default=0.02)
+    parser.add_argument("--task_balanced", action="store_true")
     return parser.parse_args()
 
 
@@ -44,6 +45,7 @@ def main():
         action_following_action_chunk_size=cli.chunk_size,
         action_following_dataset_length=0,
         action_following_sampling_seed=cli.seed,
+        action_following_task_balanced=cli.task_balanced,
     )
     dataset = ActionFollowingCtrlWorldDataset(args, mode="train")
     report = dataset.audit_sampler(
