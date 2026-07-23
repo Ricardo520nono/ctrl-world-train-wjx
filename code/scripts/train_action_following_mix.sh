@@ -32,6 +32,16 @@ fi
 LATENT_ROOT="${LATENT_ROOT:-${DEFAULT_LATENT_ROOT}}"
 META_ROOT="${META_ROOT:-${DEFAULT_META_ROOT}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/${RUN_NAME}}"
+TRAIN_MANIFEST_NAME="${TRAIN_MANIFEST_NAME:-train.jsonl}"
+if [[ "${TRAIN_MANIFEST_NAME}" != *.jsonl ]]; then
+  TRAIN_MANIFEST_NAME="${TRAIN_MANIFEST_NAME}.jsonl"
+fi
+TRAIN_MANIFEST="${ACTION_FOLLOWING_TRAIN_MANIFEST:-${LATENT_ROOT}/manifests/${TRAIN_MANIFEST_NAME}}"
+VAL_MANIFEST_NAME="${VAL_MANIFEST_NAME:-test_quick.jsonl}"
+if [[ "${VAL_MANIFEST_NAME}" != *.jsonl ]]; then
+  VAL_MANIFEST_NAME="${VAL_MANIFEST_NAME}.jsonl"
+fi
+VAL_MANIFEST="${ACTION_FOLLOWING_VAL_MANIFEST:-${LATENT_ROOT}/manifests/${VAL_MANIFEST_NAME}}"
 
 SVD_PATH="${SVD_PATH:-${ASSET_ROOT}/stable-video-diffusion-img2vid}"
 CLIP_PATH="${CLIP_PATH:-${ASSET_ROOT}/clip-vit-base-patch32}"
@@ -147,7 +157,7 @@ elif [[ "${PROTOCOL}" == "enhanced_1to1to1to1" ]]; then
 else
   REQUIRED_TRAIN_FAMILIES="clean,perturbed,random_feasible,counterfactual_replay"
 fi
-"${PYTHON_BIN}" - "${LATENT_ROOT}/manifests/train.jsonl" "${REQUIRED_TRAIN_FAMILIES}" <<'PY'
+"${PYTHON_BIN}" - "${TRAIN_MANIFEST}" "${REQUIRED_TRAIN_FAMILIES}" <<'PY'
 import json
 import sys
 
@@ -184,7 +194,7 @@ if [[ "${PROTOCOL}" == "mix_4to1to1to1to1" || "${PROTOCOL}" == "mix_1to1to1to1to
 else
   REQUIRED_VAL_FAMILIES="perturbed,random_feasible,counterfactual_replay"
 fi
-"${PYTHON_BIN}" - "${LATENT_ROOT}/manifests/${VAL_MANIFEST_NAME:-test_quick}.jsonl" "${REQUIRED_VAL_FAMILIES}" <<'PY'
+"${PYTHON_BIN}" - "${VAL_MANIFEST}" "${REQUIRED_VAL_FAMILIES}" <<'PY'
 import json
 import sys
 
@@ -265,6 +275,8 @@ fi
   echo "LATENT_ROOT=${LATENT_ROOT}"
   echo "META_ROOT=${META_ROOT}"
   echo "TASK_INSTRUCTION_ROOT=${TASK_INSTRUCTION_ROOT}"
+  echo "TRAIN_MANIFEST=${TRAIN_MANIFEST}"
+  echo "VAL_MANIFEST=${VAL_MANIFEST}"
   echo "STAT_MANIFEST=${STAT_MANIFEST:-}"
   echo "INCLUDE_CLEAN=${INCLUDE_CLEAN}"
   echo "INCLUDE_ENHANCED=${INCLUDE_ENHANCED}"
@@ -302,8 +314,8 @@ fi
   --dataset_cfgs "$(basename "${META_ROOT}")" \
   --dataset_names "$(echo "${TASKS}" | tr ' ' '+')" \
   --action_following_latent_root "${LATENT_ROOT}" \
-  --action_following_train_manifest "${LATENT_ROOT}/manifests/train.jsonl" \
-  --action_following_val_manifest "${LATENT_ROOT}/manifests/${VAL_MANIFEST_NAME:-test_quick}.jsonl" \
+  --action_following_train_manifest "${TRAIN_MANIFEST}" \
+  --action_following_val_manifest "${VAL_MANIFEST}" \
   --action_following_stat_path "${META_ROOT}/stat.json" \
   --action_following_sampling_protocol "${PROTOCOL}" \
   --action_following_chunk_size "${CHUNK_SIZE}" \
